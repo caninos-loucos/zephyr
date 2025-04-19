@@ -258,7 +258,7 @@
 			status = "disabled";
 		};
 
-		xspi1: xspi@47001400 {
+		xspi1: spi@47001400 {
 			compatible = "st,stm32-xspi";
 			reg = <0x47001400 0x400>;
 			interrupts = <78 0>;
@@ -266,7 +266,7 @@
 			clocks = <&rcc STM32_CLOCK(AHB4, 20U)>,
 				<&rcc STM32_SRC_PLL1_Q OCTOSPI1_SEL(1)>;
 			#address-cells = <1>;
-			#size-cells = <0>;
+			#size-cells = <1>;
 			status = "disabled";
 		};
 

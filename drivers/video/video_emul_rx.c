@@ -131,20 +131,12 @@ static int emul_rx_get_caps(const struct device *dev, enum video_endpoint_id ep,
 	return video_get_caps(cfg->source_dev, VIDEO_EP_OUT, caps);
 }
 
-static int emul_rx_stream_start(const struct device *dev)
+static int emul_rx_set_stream(const struct device *dev, bool enable)
 {
 	const struct emul_rx_config *cfg = dev->config;
 
-	/* A real hardware driver would first start its own peripheral */
-	return video_stream_start(cfg->source_dev);
-}
-
-static int emul_rx_stream_stop(const struct device *dev)
-{
-	const struct emul_rx_config *cfg = dev->config;
-
-	return video_stream_stop(cfg->source_dev);
-	/* A real hardware driver would then stop its own peripheral */
+	/* A real hardware driver would first start / stop its own peripheral */
+	return enable ? video_stream_start(cfg->source_dev) : video_stream_stop(cfg->source_dev);
 }
 
 static void emul_rx_worker(struct k_work *work)
@@ -164,10 +156,13 @@ static void emul_rx_worker(struct k_work *work)
 
 		LOG_DBG("Inserting %u bytes into buffer %p", vbuf->bytesused, vbuf->buffer);
 
-		/* Simulate the MIPI/DVP hardware transferring image data from the imager to the
-		 * video buffer memory using DMA. The vbuf->size is checked in emul_rx_enqueue().
+		/* Simulate the MIPI/DVP hardware transferring image data line-by-line from the
+		 * imager to the video buffer memory using DMA copying the data line-by-line over
+		 * the whole frame. vbuf->size is already checked in emul_rx_enqueue().
 		 */
-		memcpy(vbuf->buffer, cfg->source_dev->data, vbuf->bytesused);
+		for (size_t i = 0; i + fmt->pitch <= vbuf->bytesused; i += fmt->pitch) {
+			memcpy(vbuf->buffer + i, cfg->source_dev->data, fmt->pitch);
+		}
 
 		/* Once the buffer is completed, submit it to the video buffer */
 		k_fifo_put(&data->fifo_out, vbuf);
@@ -232,9 +227,6 @@ static int emul_rx_flush(const struct device *dev, enum video_endpoint_id ep, bo
 	if (cancel) {
 		struct video_buffer *vbuf;
 
-		/* First, stop the hardware processing */
-		emul_rx_stream_stop(dev);
-
 		/* Cancel the jobs that were not running */
 		k_work_cancel(&data->work);
 
@@ -262,8 +254,7 @@ static DEVICE_API(video, emul_rx_driver_api) = {
 	.set_format = emul_rx_set_fmt,
 	.get_format = emul_rx_get_fmt,
 	.get_caps = emul_rx_get_caps,
-	.stream_start = emul_rx_stream_start,
-	.stream_stop = emul_rx_stream_stop,
+	.set_stream = emul_rx_set_stream,
 	.enqueue = emul_rx_enqueue,
 	.dequeue = emul_rx_dequeue,
 	.flush = emul_rx_flush,
