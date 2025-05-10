@@ -98,8 +98,9 @@ _rom_store_table = 0;
 
 _iram_dram_offset = IRAM_DRAM_OFFSET;
 
-/* Stack sentry */
+/* Heap size calculations */
 _heap_sentry = DRAM_RESERVED_START;
+_libc_heap_size = _heap_sentry - _end;
 
 SECTIONS
 {
@@ -138,23 +139,41 @@ SECTIONS
     LONG(LOADADDR(.dram0.data))
     LONG(LOADADDR(.dram0.end) - LOADADDR(.dram0.data))
 
-    /* RTC_TEXT metadata:
-     * 8. Destination address (VMA) for RTC_TEXT region
-     * 9. Flash offset (LMA) for start of RTC_TEXT region
-     * 10. Size of RTC region
+    /* RTC_IRAM metadata:
+     * 8. Destination address (VMA) for RTC_IRAM region
+     * 9. Flash offset (LMA) for start of RTC_IRAM region
+     * 10. Size of RTC_IRAM region
      */
     LONG(ADDR(.rtc.text))
     LONG(LOADADDR(.rtc.text))
     LONG(SIZEOF(.rtc.text))
 
-    /* RTC_DATA metadata:
-     * 11. Destination address (VMA) for RTC_DATA region
-     * 12. Flash offset (LMA) for start of RTC_DATA region
-     * 13. Size of RTC region
+    /* RTC_DRAM metadata:
+     * 11. Destination address (VMA) for RTC_DRAM region
+     * 12. Flash offset (LMA) for start of RTC_DRAM region
+     * 13. Size of RTC_DRAM region
      */
     LONG(ADDR(.rtc.data))
     LONG(LOADADDR(.rtc.data))
     LONG(SIZEOF(.rtc.data))
+
+    /* IROM metadata:
+     * 14. Destination address (VMA) for IROM region
+     * 15. Flash offset (LMA) for start of IROM region
+     * 16. Size of IROM region
+     */
+    LONG(ADDR(.flash.text))
+    LONG(LOADADDR(.flash.text))
+    LONG(SIZEOF(.flash.text))
+
+    /* DROM metadata:
+     * 17. Destination address (VMA) for DROM region
+     * 18. Flash offset (LMA) for start of DROM region
+     * 19. Size of DROM region
+     */
+    LONG(ADDR(.flash.rodata))
+    LONG(LOADADDR(.flash.rodata))
+    LONG(LOADADDR(.flash.rodata_end) - LOADADDR(.flash.rodata))
   } > metadata
 #endif /* CONFIG_BOOTLOADER_MCUBOOT */
 
@@ -311,11 +330,13 @@ SECTIONS
     *liblib__libc__minimal.a:string.*(.literal .text .literal.* .text.*)
     *liblib__libc__picolib.a:string.*(.literal .text .literal.* .text.*)
     *libzephyr.a:periph_ctrl.*(.literal .text .literal.* .text.*)
+    *libzephyr.a:regi2c_ctrl.*(.literal .text .literal.* .text.*)
     *libgcov.a:(.literal .text .literal.* .text.*)
     *libphy.a:( .phyiram .phyiram.*)
     *libc.a:*(.literal .text .literal.* .text.*)
 
     /* [mapping:hal] */
+    *libzephyr.a:efuse_hal.*(.literal .text .literal.* .text.*)
     *libzephyr.a:mmu_hal.*(.literal .text .literal.* .text.*)
     *libzephyr.a:spi_flash_hal_iram.*(.literal .literal.* .text .text.*)
     *libzephyr.a:spi_flash_encrypt_hal_iram.*(.literal .text .literal.* .text.*)
@@ -394,7 +415,7 @@ SECTIONS
 #if defined(CONFIG_ESP32_WIFI_IRAM_OPT)
     *libnet80211.a:( .wifi0iram  .wifi0iram.* .wifislpiram .wifislpiram.* .wifiextrairam .wifiextrairam.*)
     *libpp.a:( .wifi0iram  .wifi0iram.* .wifislpiram .wifislpiram.* .wifiextrairam .wifiextrairam.*)
-    *libcoexist.a:(.wifi_slp_iram .wifi_slp_iram.*)
+    *libcoexist.a:(.wifi_slp_iram  .wifi_slp_iram.* .coexiram .coexiram.* .coexsleepiram .coexsleepiram.*)
 
     /* [mapping:esp_wifi] */
     *(.literal.wifi_clock_enable_wrapper .text.wifi_clock_enable_wrapper)
@@ -541,6 +562,7 @@ SECTIONS
     *libzephyr.a:cache_utils.*(.rodata .rodata.* .srodata .srodata.*)
 
     /* [mapping:hal] */
+    *libzephyr.a:efuse_hal.*(.rodata .rodata.* .srodata .srodata.*)
     *libzephyr.a:mmu_hal.*(.rodata .rodata.* .srodata .srodata.*)
     *libzephyr.a:spi_flash_hal_iram.*(.rodata .rodata.* .srodata .srodata.*)
     *libzephyr.a:spi_flash_encrypt_hal_iram.*(.rodata .rodata.* .srodata .srodata.*)
@@ -732,6 +754,7 @@ SECTIONS
 #if !defined(CONFIG_ESP32_WIFI_IRAM_OPT)
     *libnet80211.a:( .wifi0iram  .wifi0iram.* .wifislpiram .wifislpiram.* .wifiextrairam .wifiextrairam.*)
     *libpp.a:( .wifi0iram  .wifi0iram.* .wifislpiram .wifislpiram.* .wifiextrairam .wifiextrairam.*)
+    *libcoexist.a:(.wifi_slp_iram  .wifi_slp_iram.* .coexiram .coexiram.* .coexsleepiram .coexsleepiram.*)
 #endif /* CONFIG_ESP32_WIFI_IRAM_OPT */
 
 #if !defined(CONFIG_ESP32_WIFI_RX_IRAM_OPT)

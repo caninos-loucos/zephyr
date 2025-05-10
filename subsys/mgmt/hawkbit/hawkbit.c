@@ -638,7 +638,7 @@ static int hawkbit_find_cancel_action_id(struct hawkbit_ctl_res *res,
 		return -EINVAL;
 	}
 
-	helper += sizeof("cancelAction/");
+	helper += sizeof("cancelAction/") - 1;
 
 	*cancel_action_id = strtol(helper, NULL, 10);
 	if (*cancel_action_id <= 0) {
@@ -859,11 +859,13 @@ int hawkbit_init(void)
 		}
 
 		LOG_DBG("Marked current image as OK");
-		ret = boot_erase_img_bank(FIXED_PARTITION_ID(SLOT1_LABEL));
+		ret = boot_erase_img_bank(flash_img_get_upload_slot());
 		if (ret < 0) {
 			LOG_ERR("Failed to erase second slot: %d", ret);
 			return ret;
 		}
+
+		hawkbit_event_raise(HAWKBIT_EVENT_CONFIRMED_CURRENT_IMAGE);
 	}
 	hawkbit_initialized = true;
 

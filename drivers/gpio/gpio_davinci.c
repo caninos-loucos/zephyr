@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2023 BeagleBoard.org Foundation
  * Copyright (C) 2023 S Prashanth
+ * Copyright (C) 2025 Siemens Mobility GmbH
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,7 +33,8 @@ LOG_MODULE_REGISTER(gpio_davinci, CONFIG_GPIO_LOG_LEVEL);
 #define GPIO_DAVINCI_DIR_RESET_VAL	(0xFFFFFFFF)
 
 struct gpio_davinci_regs {
-	uint32_t dir;
+	uint32_t UNUSED[4];		/* 0x00-0x0C */
+	uint32_t dir;			/* 0x10 */
 	uint32_t out_data;
 	uint32_t set_data;
 	uint32_t clr_data;
@@ -53,8 +55,8 @@ struct gpio_davinci_data {
 };
 
 struct gpio_davinci_config {
-	void (*bank_config)(const struct device *dev);
 	struct gpio_driver_config common;
+	void (*bank_config)(const struct device *dev);
 
 	DEVICE_MMIO_NAMED_ROM(port_base);
 
