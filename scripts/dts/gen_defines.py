@@ -554,7 +554,7 @@ def write_pinctrls(node: edtlib.Node) -> None:
 def write_fixed_partitions(node: edtlib.Node) -> None:
     # Macros for child nodes of each fixed-partitions node.
 
-    if not (node.parent and "fixed-partitions" in node.parent.compats):
+    if not (node.parent and ("fixed-partitions" in node.parent.compats or "fixed-subpartitions" in node.parent.compats)):
         return
 
     global flash_area_num
@@ -719,6 +719,9 @@ def write_dep_info(node: edtlib.Node) -> None:
                           for n in sorted_list))
         else:
             return "/* nothing */"
+
+    out_comment("Node's hash:")
+    out_dt_define(f"{node.z_path_id}_HASH", node.hash)
 
     out_comment("Node's dependency ordinal:")
     out_dt_define(f"{node.z_path_id}_ORD", node.dep_ordinal)

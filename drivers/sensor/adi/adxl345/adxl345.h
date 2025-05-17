@@ -14,6 +14,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
+#include <zephyr/dt-bindings/sensor/adxl345.h>
+
 #ifdef CONFIG_ADXL345_STREAM
 #include <zephyr/rtio/rtio.h>
 #endif /* CONFIG_ADXL345_STREAM */
@@ -117,12 +119,12 @@
 #define ADXL345_BUS_SPI 1
 
 enum adxl345_odr {
-	ADXL345_ODR_12HZ = 0x7,
-	ADXL345_ODR_25HZ,
-	ADXL345_ODR_50HZ,
-	ADXL345_ODR_100HZ,
-	ADXL345_ODR_200HZ,
-	ADXL345_ODR_400HZ
+	ADXL345_ODR_12_5HZ = ADXL345_DT_ODR_12_5,
+	ADXL345_ODR_25HZ = ADXL345_DT_ODR_25,
+	ADXL345_ODR_50HZ = ADXL345_DT_ODR_50,
+	ADXL345_ODR_100HZ = ADXL345_DT_ODR_100,
+	ADXL345_ODR_200HZ = ADXL345_DT_ODR_200,
+	ADXL345_ODR_400HZ = ADXL345_DT_ODR_400,
 };
 
 enum adxl345_fifo_trigger {
@@ -156,6 +158,7 @@ struct adxl345_dev_data {
 	struct adxl345_fifo_config fifo_config;
 	uint8_t is_full_res;
 	uint8_t selected_range;
+	enum adxl345_odr odr;
 #ifdef CONFIG_ADXL345_TRIGGER
 	struct gpio_callback gpio_cb;
 
@@ -204,6 +207,7 @@ struct adxl345_sample {
 	uint8_t res: 7;
 #endif /* CONFIG_ADXL345_STREAM */
 	uint8_t selected_range;
+	bool is_full_res;
 	int16_t x;
 	int16_t y;
 	int16_t z;

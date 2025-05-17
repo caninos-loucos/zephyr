@@ -13,4 +13,7 @@ supported:
   - watchdog
   - entropy
   - adc
+  - usb_device
+  - usbd
+  - memc
 vendor: st

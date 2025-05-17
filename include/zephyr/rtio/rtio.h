@@ -31,6 +31,7 @@
 #include <zephyr/app_memory/app_memdomain.h>
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
+#include <zephyr/kernel_structs.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/mem_blocks.h>
@@ -47,7 +48,7 @@ extern "C" {
  * @brief RTIO
  * @defgroup rtio RTIO
  * @since 3.2
- * @version 0.1.0
+ * @version 0.2.0
  * @ingroup os_services
  * @{
  */
@@ -281,6 +282,14 @@ struct rtio_iodev_sqe;
 typedef void (*rtio_callback_t)(struct rtio *r, const struct rtio_sqe *sqe, void *arg0);
 
 /**
+ * @typedef rtio_signaled_t
+ * @brief Callback signature for RTIO_OP_AWAIT signaled
+ * @param iodev_sqe IODEV submission for the await op
+ * @param userdata Userdata
+ */
+typedef void (*rtio_signaled_t)(struct rtio_iodev_sqe *iodev_sqe, void *userdata);
+
+/**
  * @brief A submission queue event
  */
 struct rtio_sqe {
@@ -336,6 +345,12 @@ struct rtio_sqe {
 			uint8_t *rx_buf; /**< Buffer to read into */
 		} txrx;
 
+		/** OP_DELAY */
+		struct {
+			k_timeout_t timeout; /**< Delay timeout. */
+			struct _timeout to; /**< Timeout struct. Used internally. */
+		} delay;
+
 		/** OP_I2C_CONFIGURE */
 		uint32_t i2c_config;
 
@@ -349,6 +364,13 @@ struct rtio_sqe {
 		/** OP_I3C_CCC */
 		/* struct i3c_ccc_payload *ccc_payload; */
 		void *ccc_payload;
+
+		/** OP_AWAIT */
+		struct {
+			atomic_t ok;
+			rtio_signaled_t callback;
+			void *userdata;
+		} await;
 	};
 };
 
@@ -540,8 +562,11 @@ struct rtio_iodev {
 /** An operation that transceives (reads and writes simultaneously) */
 #define RTIO_OP_TXRX (RTIO_OP_CALLBACK+1)
 
+/** An operation that takes a specified amount of time (asynchronously) before completing */
+#define RTIO_OP_DELAY (RTIO_OP_TXRX+1)
+
 /** An operation to recover I2C buses */
-#define RTIO_OP_I2C_RECOVER (RTIO_OP_TXRX+1)
+#define RTIO_OP_I2C_RECOVER (RTIO_OP_DELAY+1)
 
 /** An operation to configure I2C buses */
 #define RTIO_OP_I2C_CONFIGURE (RTIO_OP_I2C_RECOVER+1)
@@ -554,6 +579,9 @@ struct rtio_iodev {
 
 /** An operation to sends I3C CCC */
 #define RTIO_OP_I3C_CCC (RTIO_OP_I3C_CONFIGURE+1)
+
+/** An operation to suspend bus while awaiting signal */
+#define RTIO_OP_AWAIT (RTIO_OP_I3C_CCC+1)
 
 /**
  * @brief Prepare a nop (no op) submission
@@ -714,6 +742,30 @@ static inline void rtio_sqe_prep_transceive(struct rtio_sqe *sqe,
 	sqe->txrx.buf_len = buf_len;
 	sqe->txrx.tx_buf = tx_buf;
 	sqe->txrx.rx_buf = rx_buf;
+	sqe->userdata = userdata;
+}
+
+static inline void rtio_sqe_prep_await(struct rtio_sqe *sqe,
+				       const struct rtio_iodev *iodev,
+				       int8_t prio,
+				       void *userdata)
+{
+	memset(sqe, 0, sizeof(struct rtio_sqe));
+	sqe->op = RTIO_OP_AWAIT;
+	sqe->prio = prio;
+	sqe->iodev = iodev;
+	sqe->userdata = userdata;
+}
+
+static inline void rtio_sqe_prep_delay(struct rtio_sqe *sqe,
+				       k_timeout_t timeout,
+				       void *userdata)
+{
+	memset(sqe, 0, sizeof(struct rtio_sqe));
+	sqe->op = RTIO_OP_DELAY;
+	sqe->prio = 0;
+	sqe->iodev = NULL;
+	sqe->delay.timeout = timeout;
 	sqe->userdata = userdata;
 }
 
@@ -1259,7 +1311,16 @@ static inline void rtio_cqe_submit(struct rtio *r, int result, void *userdata, u
 		rtio_cqe_produce(r, cqe);
 	}
 
-	atomic_inc(&r->cq_count);
+	/* atomic_t isn't guaranteed to wrap correctly as it could be signed, so
+	 * we must resort to a cas loop.
+	 */
+	atomic_t val, new_val;
+
+	do {
+		val = atomic_get(&r->cq_count);
+		new_val = (atomic_t)((uintptr_t)val + 1);
+	} while (!atomic_cas(&r->cq_count, val, new_val));
+
 #ifdef CONFIG_RTIO_SUBMIT_SEM
 	if (r->submit_count > 0) {
 		r->submit_count--;
@@ -1399,6 +1460,50 @@ static inline int z_impl_rtio_sqe_cancel(struct rtio_sqe *sqe)
 }
 
 /**
+ * @brief Signal an AWAIT SQE
+ *
+ * If the SQE is currently blocking execution, execution is unblocked. If the SQE is not
+ * currently blocking execution, The SQE will be skipped.
+ *
+ * @note To await the AWAIT SQE blocking execution, chain a nop or callback SQE before
+ * the await SQE.
+ *
+ * @param[in] sqe The SQE to signal
+ */
+__syscall void rtio_sqe_signal(struct rtio_sqe *sqe);
+
+static inline void z_impl_rtio_sqe_signal(struct rtio_sqe *sqe)
+{
+	struct rtio_iodev_sqe *iodev_sqe = CONTAINER_OF(sqe, struct rtio_iodev_sqe, sqe);
+
+	if (!atomic_cas(&iodev_sqe->sqe.await.ok, 0, 1)) {
+		iodev_sqe->sqe.await.callback(iodev_sqe, iodev_sqe->sqe.await.userdata);
+	}
+}
+
+/**
+ * @brief Await an AWAIT SQE signal from RTIO IODEV
+ *
+ * If the SQE is already signaled, the callback is called immediately. Otherwise the
+ * callback will be called once the AWAIT SQE is signaled.
+ *
+ * @param[in] iodev_sqe The IODEV SQE to await signaled
+ * @param[in] callback Callback called when SQE is signaled
+ * @param[in] userdata User data passed to callback
+ */
+static inline void rtio_iodev_sqe_await_signal(struct rtio_iodev_sqe *iodev_sqe,
+					       rtio_signaled_t callback,
+					       void *userdata)
+{
+	iodev_sqe->sqe.await.callback = callback;
+	iodev_sqe->sqe.await.userdata = userdata;
+
+	if (!atomic_cas(&iodev_sqe->sqe.await.ok, 0, 1)) {
+		callback(iodev_sqe, userdata);
+	}
+}
+
+/**
  * @brief Copy an array of SQEs into the queue and get resulting handles back
  *
  * Copies one or more SQEs into the RTIO context and optionally returns their generated SQE handles.
@@ -1510,6 +1615,8 @@ static inline int z_impl_rtio_cqe_copy_out(struct rtio *r,
  * submission chain, freeing submission queue events when done, and
  * producing completion queue events as submissions are completed.
  *
+ * @warning It is undefined behavior to have re-entrant calls to submit
+ *
  * @param r RTIO context
  * @param wait_count Number of submissions to wait for completion of.
  *
@@ -1517,13 +1624,11 @@ static inline int z_impl_rtio_cqe_copy_out(struct rtio *r,
  */
 __syscall int rtio_submit(struct rtio *r, uint32_t wait_count);
 
+#ifdef CONFIG_RTIO_SUBMIT_SEM
 static inline int z_impl_rtio_submit(struct rtio *r, uint32_t wait_count)
 {
 	int res = 0;
 
-#ifdef CONFIG_RTIO_SUBMIT_SEM
-	/* TODO undefined behavior if another thread calls submit of course
-	 */
 	if (wait_count > 0) {
 		__ASSERT(!k_is_in_isr(),
 			 "expected rtio submit with wait count to be called from a thread");
@@ -1531,35 +1636,43 @@ static inline int z_impl_rtio_submit(struct rtio *r, uint32_t wait_count)
 		k_sem_reset(r->submit_sem);
 		r->submit_count = wait_count;
 	}
-#else
-	uintptr_t cq_count = (uintptr_t)atomic_get(&r->cq_count) + wait_count;
-#endif
 
-	/* Submit the queue to the executor which consumes submissions
-	 * and produces completions through ISR chains or other means.
-	 */
 	rtio_executor_submit(r);
-
-
-	/* TODO could be nicer if we could suspend the thread and not
-	 * wake up on each completion here.
-	 */
-#ifdef CONFIG_RTIO_SUBMIT_SEM
 
 	if (wait_count > 0) {
 		res = k_sem_take(r->submit_sem, K_FOREVER);
 		__ASSERT(res == 0,
 			 "semaphore was reset or timed out while waiting on completions!");
 	}
-#else
-	while ((uintptr_t)atomic_get(&r->cq_count) < cq_count) {
-		Z_SPIN_DELAY(10);
-		k_yield();
-	}
-#endif
 
 	return res;
 }
+#else
+static inline int z_impl_rtio_submit(struct rtio *r, uint32_t wait_count)
+{
+
+	int res = 0;
+	uintptr_t cq_count = (uintptr_t)atomic_get(&r->cq_count);
+	uintptr_t cq_complete_count = cq_count + wait_count;
+	bool wraps = cq_complete_count < cq_count;
+
+	rtio_executor_submit(r);
+
+	if (wraps) {
+		while ((uintptr_t)atomic_get(&r->cq_count) >= cq_count) {
+			Z_SPIN_DELAY(10);
+			k_yield();
+		}
+	}
+
+	while ((uintptr_t)atomic_get(&r->cq_count) < cq_complete_count) {
+		Z_SPIN_DELAY(10);
+		k_yield();
+	}
+
+	return res;
+}
+#endif /* CONFIG_RTIO_SUBMIT_SEM */
 
 /**
  * @}
