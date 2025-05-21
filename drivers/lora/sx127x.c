@@ -625,6 +625,11 @@ static int sx127x_lora_init(const struct device *dev)
 	return 0;
 }
 
+static int sx127x_lora_reset(const struct device *dev)
+{
+	return sx127x_lora_init(dev);
+}
+
 static DEVICE_API(lora, sx127x_lora_api) = {
 	.config = sx12xx_lora_config,
 	.send = sx12xx_lora_send,
@@ -632,6 +637,7 @@ static DEVICE_API(lora, sx127x_lora_api) = {
 	.recv = sx12xx_lora_recv,
 	.recv_async = sx12xx_lora_recv_async,
 	.test_cw = sx12xx_lora_test_cw,
+	.reset = sx127x_lora_reset,
 };
 
 DEVICE_DT_INST_DEFINE(0, &sx127x_lora_init, NULL, NULL,

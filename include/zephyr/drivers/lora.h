@@ -180,6 +180,14 @@ typedef int (*lora_api_recv_async)(const struct device *dev, lora_recv_cb cb,
 typedef int (*lora_api_test_cw)(const struct device *dev, uint32_t frequency,
 				int8_t tx_power, uint16_t duration);
 
+/**
+ * @typedef lora_api_reset
+ * @brief Callback API for reinitialization of LoRa device callbacks and data
+ *
+ * @see lora_reset() for argument descriptions.
+ */
+typedef int (*lora_api_reset)(const struct device *dev);
+
 __subsystem struct lora_driver_api {
 	lora_api_config config;
 	lora_api_send send;
@@ -187,6 +195,7 @@ __subsystem struct lora_driver_api {
 	lora_api_recv recv;
 	lora_api_recv_async recv_async;
 	lora_api_test_cw test_cw;
+	lora_api_reset reset;
 };
 
 /** @endcond */
@@ -322,6 +331,21 @@ static inline int lora_test_cw(const struct device *dev, uint32_t frequency,
 	}
 
 	return api->test_cw(dev, frequency, tx_power, duration);
+}
+
+/**
+ * @brief Resets LoRa callbacks to device defaults
+ *
+ * @note Can be used to remove LoRaMac callbacks when previously using LoRaWAN.
+ *
+ * @param dev	LoRa device
+ * @return 0 on success, negative on error
+ */
+static inline int lora_reset(const struct device *dev)
+{
+	const struct lora_driver_api *api = (const struct lora_driver_api *)dev->api;
+
+	return api->reset(dev);
 }
 
 #ifdef __cplusplus
