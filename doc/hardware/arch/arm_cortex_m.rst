@@ -55,6 +55,8 @@ Arm Cortex-M implementation variants.
 +---------------------------------+-----------------------------------+-----------------+---------+--------+-----------+--------+---------+------------+------------+
 |                                 | HW-assisted stack limit checking  |        N        |   N     |   N    |    N      |    N   |Y [#f2]_ |     Y      |   Y        |
 +---------------------------------+-----------------------------------+-----------------+---------+--------+-----------+--------+---------+------------+------------+
+|                                 | Privileged Execute Never          |        N        |   N     |   N    |    N      |    N   |    N    |     N      |   Y [#f3]_ |
++---------------------------------+-----------------------------------+-----------------+---------+--------+-----------+--------+---------+------------+------------+
 | HW-assisted null-pointer        |                                   |                 |         |        |           |        |         |            |            |
 | dereference detection           |                                   |        N        |   N     |   Y    |    Y      |    Y   |    Y    |     Y      |   Y        |
 +---------------------------------+-----------------------------------+-----------------+---------+--------+-----------+--------+---------+------------+------------+
@@ -86,6 +88,7 @@ Notes
 
 .. [#f1] SysTick is optional in Cortex-M1
 .. [#f2] Stack limit checking only in Secure builds in Cortex-M23
+.. [#f3] https://developer.arm.com/documentation/107655/100/RTOS-and-Secure-software-design-considerations/Secure-software-development-design-considerations/Security-and-privilege-combination/Using-PXN-bit?lang=en
 
 OS features
 ***********
@@ -629,8 +632,16 @@ script as well.
 CMSIS
 *****
 
-Cortex-M CMSIS headers are hosted in a standalone module repository:
-`zephyrproject-rtos/cmsis <https://github.com/zephyrproject-rtos/cmsis>`_.
+Cortex-M CMSIS headers are provided through standalone module repositories:
+
+- **CMSIS 5**: `zephyrproject-rtos/cmsis <https://github.com/zephyrproject-rtos/cmsis>`_
+- **CMSIS 6**: `zephyrproject-rtos/CMSIS_6 <https://github.com/zephyrproject-rtos/CMSIS_6>`_
+
+Zephyr has begun transitioning to **CMSIS 6** as the default source for Cortex-M core headers.
+However, at present, Zephyr includes headers from **both** the CMSIS 6 and legacy CMSIS 5 modules.
+
+The legacy CMSIS 5 headers remain available primarily for compatibility with vendor HALs, while all
+new architecture-level development should use **CMSIS 6** headers whenever possible.
 
 :kconfig:option:`CONFIG_CPU_CORTEX_M` selects :kconfig:option:`CONFIG_HAS_CMSIS_CORE` to signify that
 CMSIS headers are available for all supported Cortex-M variants.
