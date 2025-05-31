@@ -73,13 +73,14 @@ static int eth_nxp_enet_qos_tx(const struct device *dev, struct net_pkt *pkt)
 		frags_count++;
 		total_bytes += fragment->len;
 		fragment = fragment->frags;
+
+		if (total_bytes > config->hw_info.max_frame_len ||
+			frags_count > NUM_TX_BUFDESC) {
+			LOG_ERR("TX packet too large");
+			return -E2BIG;
+		}
 	}
 
-	if (total_bytes > config->hw_info.max_frame_len ||
-	    frags_count > NUM_TX_BUFDESC) {
-		LOG_ERR("TX packet too large");
-		return -E2BIG;
-	}
 
 	/* One TX at a time in the current implementation */
 	k_sem_take(&data->tx.tx_sem, K_FOREVER);
@@ -160,7 +161,7 @@ static void tx_dma_done(struct k_work *work)
 
 static enum ethernet_hw_caps eth_nxp_enet_qos_get_capabilities(const struct device *dev)
 {
-	return ETHERNET_LINK_100BASE_T | ETHERNET_LINK_10BASE_T | ENET_MAC_PACKET_FILTER_PM_MASK;
+	return ETHERNET_LINK_100BASE | ETHERNET_LINK_10BASE | ENET_MAC_PACKET_FILTER_PM_MASK;
 }
 
 static void eth_nxp_enet_qos_rx(struct k_work *work)
