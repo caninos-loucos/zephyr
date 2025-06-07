@@ -5,11 +5,13 @@ arch: riscv
 toolchain:
   - zephyr
 supported:
+  - adc
   - gpio
   - watchdog
   - uart
   - counter
   - entropy
+  - i2c
   - pwm
   - spi
 vendor: espressif

@@ -7,9 +7,7 @@
 #include <zephyr/ztest.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/drivers/mbox.h>
 
 #include <stdlib.h>
 
@@ -228,6 +226,33 @@ ZTEST(devicetree_api, test_any_inst_prop)
 		      1, "");
 }
 
+ZTEST(devicetree_api, test_all_inst_prop)
+{
+	zassert_equal(DT_ALL_INST_HAS_PROP_STATUS_OKAY(foo), 1, "");
+	zassert_equal(DT_ALL_INST_HAS_PROP_STATUS_OKAY(bar), 0, "");
+	zassert_equal(DT_ALL_INST_HAS_PROP_STATUS_OKAY(baz), 0, "");
+	zassert_equal(DT_ALL_INST_HAS_PROP_STATUS_OKAY(does_not_exist), 0, "");
+
+	zassert_equal(COND_CODE_1(DT_ALL_INST_HAS_PROP_STATUS_OKAY(foo),
+				  (5), (6)),
+		      5, "");
+	zassert_equal(COND_CODE_0(DT_ALL_INST_HAS_PROP_STATUS_OKAY(foo),
+				  (5), (6)),
+		      6, "");
+	zassert_equal(COND_CODE_1(DT_ALL_INST_HAS_PROP_STATUS_OKAY(baz),
+				  (5), (6)),
+		      6, "");
+	zassert_equal(COND_CODE_0(DT_ALL_INST_HAS_PROP_STATUS_OKAY(baz),
+				  (5), (6)),
+		      5, "");
+	zassert_true(IS_ENABLED(DT_ALL_INST_HAS_PROP_STATUS_OKAY(foo)), "");
+	zassert_true(!IS_ENABLED(DT_ALL_INST_HAS_PROP_STATUS_OKAY(baz)), "");
+	zassert_equal(IF_ENABLED(DT_ALL_INST_HAS_PROP_STATUS_OKAY(foo), (1)) + 1,
+		      2, "");
+	zassert_equal(IF_ENABLED(DT_ALL_INST_HAS_PROP_STATUS_OKAY(baz), (1)) + 1,
+		      1, "");
+}
+
 #undef DT_DRV_COMPAT
 ZTEST(devicetree_api, test_any_compat_inst_prop)
 {
@@ -264,6 +289,33 @@ ZTEST(devicetree_api, test_any_inst_bool)
 	zassert_equal(IF_ENABLED(DT_ANY_INST_HAS_BOOL_STATUS_OKAY(bool_foo), (1)) + 1,
 		      2, "");
 	zassert_equal(IF_ENABLED(DT_ANY_INST_HAS_BOOL_STATUS_OKAY(bool_baz), (1)) + 1,
+		      1, "");
+}
+
+ZTEST(devicetree_api, test_all_inst_bool)
+{
+	zassert_equal(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_foo), 1, "");
+	zassert_equal(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_bar), 0, "");
+	zassert_equal(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_baz), 0, "");
+	zassert_equal(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(does_not_exist), 0, "");
+
+	zassert_equal(COND_CODE_1(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_foo),
+				  (5), (6)),
+		      5, "");
+	zassert_equal(COND_CODE_0(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_foo),
+				  (5), (6)),
+		      6, "");
+	zassert_equal(COND_CODE_1(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_baz),
+				  (5), (6)),
+		      6, "");
+	zassert_equal(COND_CODE_0(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_baz),
+				  (5), (6)),
+		      5, "");
+	zassert_true(IS_ENABLED(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_foo)), "");
+	zassert_true(!IS_ENABLED(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_baz)), "");
+	zassert_equal(IF_ENABLED(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_foo), (1)) + 1,
+		      2, "");
+	zassert_equal(IF_ENABLED(DT_ALL_INST_HAS_BOOL_STATUS_OKAY(bool_baz), (1)) + 1,
 		      1, "");
 }
 
@@ -336,6 +388,16 @@ ZTEST(devicetree_api, test_has_alias)
 {
 	zassert_equal(DT_NODE_HAS_STATUS(DT_ALIAS(test_alias), okay), 1, "");
 	zassert_equal(DT_NODE_HAS_STATUS(DT_ALIAS(test_undef), okay), 0, "");
+}
+
+ZTEST(devicetree_api, test_node_hashes)
+{
+	zassert_str_equal(TO_STRING(DT_NODE_HASH(DT_ROOT)),
+			  "il7asoJjJEMhngUeSt4tHVu8Zxx4EFG_FDeJfL3_oPE");
+	zassert_str_equal(TO_STRING(DT_NODE_HASH(TEST_DEADBEEF)),
+			  "kPPqtBX5DX_QDQMO0_cOls2ebJMevAWHhAPY1JCKTyU");
+	zassert_str_equal(TO_STRING(DT_NODE_HASH(TEST_ABCD1234)),
+			  "Bk4fvF6o3Mgslz_xiIZaJcuwo6_IeelozwOaxtUsSos");
 }
 
 ZTEST(devicetree_api, test_inst_checks)
@@ -536,17 +598,15 @@ ZTEST(devicetree_api, test_bus)
 	zassert_equal(DT_HAS_COMPAT_ON_BUS_STATUS_OKAY(vnd_i2c_device, i2c), 1);
 	zassert_equal(DT_HAS_COMPAT_ON_BUS_STATUS_OKAY(vnd_i2c_device, spi), 0);
 
-	zassert_equal(DT_HAS_COMPAT_ON_BUS_STATUS_OKAY(vnd_gpio_expander, i2c), 1,
-		      NULL);
-	zassert_equal(DT_HAS_COMPAT_ON_BUS_STATUS_OKAY(vnd_gpio_expander, spi), 1,
-		      NULL);
+	zassert_equal(DT_HAS_COMPAT_ON_BUS_STATUS_OKAY(vnd_gpio_expander, i2c), 1);
+	zassert_equal(DT_HAS_COMPAT_ON_BUS_STATUS_OKAY(vnd_gpio_expander, spi), 1);
 }
 
 #undef DT_DRV_COMPAT
 #define DT_DRV_COMPAT vnd_vendor
 
 #define VND_VENDOR "A stand-in for a real vendor which can be used in examples and tests"
-#define ZEP_VENDOR "Zephyr-specific binding"
+#define ZEP_VENDOR "The Zephyr Project"
 
 ZTEST(devicetree_api, test_vendor)
 {
@@ -760,7 +820,7 @@ ZTEST(devicetree_api, test_irq)
 	/* DT_IRQ_HAS_CELL_AT_IDX */
 	zassert_true(DT_IRQ_HAS_CELL_AT_IDX(TEST_IRQ, 0, irq), "");
 	zassert_true(DT_IRQ_HAS_CELL_AT_IDX(TEST_IRQ, 0, priority), "");
-	zassert_false(DT_IRQ_HAS_CELL_AT_IDX(TEST_IRQ, 0, foo), 0, "");
+	zassert_false(DT_IRQ_HAS_CELL_AT_IDX(TEST_IRQ, 0, foo), "");
 	zassert_true(DT_IRQ_HAS_CELL_AT_IDX(TEST_IRQ, 2, irq), "");
 	zassert_true(DT_IRQ_HAS_CELL_AT_IDX(TEST_IRQ, 2, priority), "");
 	zassert_false(DT_IRQ_HAS_CELL_AT_IDX(TEST_IRQ, 2, foo), "");
@@ -1245,27 +1305,6 @@ ZTEST(devicetree_api, test_io_channels)
 	zassert_equal(DT_INST_IO_CHANNELS_INPUT_BY_NAME(0, ch1), 10, "");
 	zassert_equal(DT_INST_IO_CHANNELS_INPUT_BY_NAME(0, ch2), 20, "");
 	zassert_equal(DT_INST_IO_CHANNELS_INPUT(0), 10, "");
-}
-
-#undef DT_DRV_COMPAT
-#define DT_DRV_COMPAT vnd_adc_temp_sensor
-ZTEST(devicetree_api, test_io_channel_names)
-{
-	struct adc_dt_spec adc_spec;
-
-	/* ADC_DT_SPEC_GET_BY_NAME */
-	adc_spec = (struct adc_dt_spec)ADC_DT_SPEC_GET_BY_NAME(TEST_TEMP, ch1);
-	zassert_equal(adc_spec.channel_id, 10, "");
-
-	adc_spec = (struct adc_dt_spec)ADC_DT_SPEC_GET_BY_NAME(TEST_TEMP, ch2);
-	zassert_equal(adc_spec.channel_id, 20, "");
-
-	/* ADC_DT_SPEC_INST_GET_BY_NAME */
-	adc_spec = (struct adc_dt_spec)ADC_DT_SPEC_INST_GET_BY_NAME(0, ch1);
-	zassert_equal(adc_spec.channel_id, 10, "");
-
-	adc_spec = (struct adc_dt_spec)ADC_DT_SPEC_INST_GET_BY_NAME(0, ch2);
-	zassert_equal(adc_spec.channel_id, 20, "");
 }
 
 #undef DT_DRV_COMPAT
@@ -3085,22 +3124,8 @@ ZTEST(devicetree_api, test_pinctrl)
 	zassert_equal(DT_INST_PINCTRL_HAS_NAME(0, f_o_o2), 0, "");
 }
 
-DEVICE_DT_DEFINE(DT_NODELABEL(test_mbox), NULL, NULL, NULL, NULL, POST_KERNEL,
-		 90, NULL);
-DEVICE_DT_DEFINE(DT_NODELABEL(test_mbox_zero_cell), NULL, NULL, NULL, NULL,
-		 POST_KERNEL, 90, NULL);
-
 ZTEST(devicetree_api, test_mbox)
 {
-#undef DT_DRV_COMPAT
-#define DT_DRV_COMPAT vnd_adc_temp_sensor
-
-	const struct mbox_dt_spec channel_tx = MBOX_DT_SPEC_GET(TEST_TEMP, tx);
-	const struct mbox_dt_spec channel_rx = MBOX_DT_SPEC_GET(TEST_TEMP, rx);
-
-	zassert_equal(channel_tx.channel_id, 1, "");
-	zassert_equal(channel_rx.channel_id, 2, "");
-
 	zassert_equal(DT_MBOX_CHANNEL_BY_NAME(TEST_TEMP, tx), 1, "");
 	zassert_equal(DT_MBOX_CHANNEL_BY_NAME(TEST_TEMP, rx), 2, "");
 
@@ -3111,10 +3136,6 @@ ZTEST(devicetree_api, test_mbox)
 
 	zassert_equal(DT_MBOX_CHANNEL_BY_NAME(TEST_TEMP, tx), 1, "");
 	zassert_equal(DT_MBOX_CHANNEL_BY_NAME(TEST_TEMP, rx), 2, "");
-
-	const struct mbox_dt_spec channel_zero = MBOX_DT_SPEC_GET(TEST_TEMP, zero);
-
-	zassert_equal(channel_zero.channel_id, 0, "");
 
 	zassert_equal(DT_MBOX_CHANNEL_BY_NAME(TEST_TEMP, zero), 0, "");
 

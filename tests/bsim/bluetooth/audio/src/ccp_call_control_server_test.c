@@ -3,8 +3,9 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #include <zephyr/autoconf.h>
@@ -118,6 +119,12 @@ static void init(void)
 
 		LOG_INF("Registered bearer[%d]", i);
 	}
+
+	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, NULL);
+	if (err != 0) {
+		FAIL("Scanning failed to start (err %d)\n", err);
+		return;
+	}
 }
 
 static void unregister_bearers(void)
@@ -142,6 +149,10 @@ static void unregister_bearers(void)
 static void test_main(void)
 {
 	init();
+
+	WAIT_FOR_FLAG(flag_connected);
+
+	WAIT_FOR_FLAG(flag_disconnected);
 
 	unregister_bearers();
 
