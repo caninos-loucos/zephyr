@@ -126,14 +126,14 @@ static int cmd_nsec(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-static bool device_is_pwm_and_ready(const struct device *dev)
+static bool device_is_pwm(const struct device *dev)
 {
-	return device_is_ready(dev) && DEVICE_API_IS(pwm, dev);
+	return DEVICE_API_IS(pwm, dev);
 }
 
 static void device_name_get(size_t idx, struct shell_static_entry *entry)
 {
-	const struct device *dev = shell_device_filter(idx, device_is_pwm_and_ready);
+	const struct device *dev = shell_device_filter(idx, device_is_pwm);
 
 	entry->syntax = (dev != NULL) ? dev->name : NULL;
 	entry->handler = NULL;
@@ -144,12 +144,21 @@ static void device_name_get(size_t idx, struct shell_static_entry *entry)
 SHELL_DYNAMIC_CMD_CREATE(dsub_device_name, device_name_get);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(pwm_cmds,
-	SHELL_CMD_ARG(cycles, &dsub_device_name, "<device> <channel> <period in cycles> "
-		      "<pulse width in cycles> [flags]", cmd_cycles, 5, 1),
-	SHELL_CMD_ARG(usec, &dsub_device_name, "<device> <channel> <period in usec> "
-		      "<pulse width in usec> [flags]", cmd_usec, 5, 1),
-	SHELL_CMD_ARG(nsec, &dsub_device_name, "<device> <channel> <period in nsec> "
-		      "<pulse width in nsec> [flags]", cmd_nsec, 5, 1),
+	SHELL_CMD_ARG(
+		cycles, &dsub_device_name,
+		SHELL_HELP("Set PWM period and pulse width in cycles.",
+			   "<device> <channel> <period> <pulse width> [flags]"),
+		cmd_cycles, 5, 1),
+	SHELL_CMD_ARG(
+		usec, &dsub_device_name,
+		SHELL_HELP("Set PWM period and pulse width in microseconds.",
+			   "<device> <channel> <period> <pulse width> [flags]"),
+		cmd_usec, 5, 1),
+	SHELL_CMD_ARG(
+		nsec, &dsub_device_name,
+		SHELL_HELP("Set PWM period and pulse width in nanoseconds.",
+			   "<device> <channel> <period> <pulse width> [flags]"),
+		cmd_nsec, 5, 1),
 	SHELL_SUBCMD_SET_END
 );
 
