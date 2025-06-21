@@ -369,6 +369,10 @@ struct uart_ns16550_dev_data {
 	void *cb_data;	/**< Callback function arg */
 #endif
 
+#ifdef CONFIG_UART_NS16550_WA_TX_FIFO_EMPTY_INTERRUPT
+	uint8_t sw_tx_irq; /**< software tx ready flag */
+#endif
+
 #if UART_NS16550_DLF_ENABLED
 	uint8_t dlf;		/**< DLF value */
 #endif
@@ -573,9 +577,7 @@ static int uart_ns16550_configure(const struct device *dev,
 	const struct uart_ns16550_dev_config * const dev_cfg = dev->config;
 	uint8_t mdc = 0U, c;
 	uint32_t pclk = 0U;
-
-	/* temp for return value if error occurs in this locked region */
-	int ret = 0;
+	int ret;
 
 	k_spinlock_key_t key = k_spin_lock(&dev_data->lock);
 
@@ -619,6 +621,11 @@ static int uart_ns16550_configure(const struct device *dev,
 	} else {
 		if (!device_is_ready(dev_cfg->clock_dev)) {
 			ret = -EINVAL;
+			goto out;
+		}
+
+		ret = clock_control_on(dev_cfg->clock_dev, dev_cfg->clock_subsys);
+		if (ret != 0 && ret != -EALREADY && ret != -ENOSYS) {
 			goto out;
 		}
 
@@ -722,6 +729,7 @@ static int uart_ns16550_configure(const struct device *dev,
 
 	/* disable interrupts  */
 	ns16550_outbyte(dev_cfg, IER(dev), 0x00);
+	ret = 0;
 
 out:
 	k_spin_unlock(&dev_data->lock, key);
@@ -929,6 +937,10 @@ static void uart_ns16550_poll_out(const struct device *dev,
 
 	ns16550_outbyte(dev_cfg, THR(dev), c);
 
+#ifdef CONFIG_UART_NS16550_WA_TX_FIFO_EMPTY_INTERRUPT
+	data->sw_tx_irq = 0; /**< clean up */
+#endif
+
 	k_spin_unlock(&data->lock, key);
 }
 
@@ -975,6 +987,12 @@ static int uart_ns16550_fifo_fill(const struct device *dev,
 	for (i = 0; (i < size) && (i < data->fifo_size); i++) {
 		ns16550_outbyte(dev_cfg, THR(dev), tx_data[i]);
 	}
+
+#ifdef CONFIG_UART_NS16550_WA_TX_FIFO_EMPTY_INTERRUPT
+	if (i != 0) {
+		data->sw_tx_irq = 0; /**< clean up */
+	}
+#endif
 
 	k_spin_unlock(&data->lock, key);
 
@@ -1038,6 +1056,26 @@ static void uart_ns16550_irq_tx_enable(const struct device *dev)
 #endif
 	ns16550_outbyte(dev_cfg, IER(dev), ns16550_inbyte(dev_cfg, IER(dev)) | IER_TBE);
 
+#ifdef CONFIG_UART_NS16550_WA_TX_FIFO_EMPTY_INTERRUPT
+	if (ns16550_inbyte(dev_cfg, LSR(dev)) & LSR_THRE) {
+		k_spin_unlock(&data->lock, key);
+		/*
+		 * The TX FIFO ready interrupt will be triggered if only if
+		 * when the pre-state is not empty. Thus, if the pre-state is
+		 * already empty, try to call the callback routine directly
+		 * to resolve it.
+		 */
+		int irq_lock_key = arch_irq_lock();
+
+		if (data->cb && (ns16550_inbyte(dev_cfg, LSR(dev)) & LSR_THRE)) {
+			data->sw_tx_irq = 1; /**< set tx ready */
+			data->cb(dev, data->cb_data);
+		}
+		arch_irq_unlock(irq_lock_key);
+		return;
+	}
+#endif
+
 	k_spin_unlock(&data->lock, key);
 }
 
@@ -1051,6 +1089,10 @@ static void uart_ns16550_irq_tx_disable(const struct device *dev)
 	struct uart_ns16550_dev_data *data = dev->data;
 	const struct uart_ns16550_dev_config * const dev_cfg = dev->config;
 	k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+#ifdef CONFIG_UART_NS16550_WA_TX_FIFO_EMPTY_INTERRUPT
+	data->sw_tx_irq = 0; /**< clean up */
+#endif
 
 	ns16550_outbyte(dev_cfg, IER(dev),
 			ns16550_inbyte(dev_cfg, IER(dev)) & (~IER_TBE));
@@ -1091,6 +1133,17 @@ static int uart_ns16550_irq_tx_ready(const struct device *dev)
 	k_spinlock_key_t key = k_spin_lock(&data->lock);
 
 	int ret = ((IIRC(dev) & IIR_ID) == IIR_THRE) ? 1 : 0;
+
+#ifdef CONFIG_UART_NS16550_WA_TX_FIFO_EMPTY_INTERRUPT
+	if (ret == 0 && data->sw_tx_irq) {
+		/**< replace resoult when there is a software solution */
+		const struct uart_ns16550_dev_config * const dev_cfg = dev->config;
+
+		if (ns16550_inbyte(dev_cfg, IER(dev)) & IER_TBE) {
+			ret = 1;
+		}
+	}
+#endif
 
 	k_spin_unlock(&data->lock, key);
 
@@ -1936,7 +1989,7 @@ static DEVICE_API(uart, uart_ns16550_driver_api) = {
 				.sys_clk_freq = 0,                                   \
 				.clock_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),  \
 				.clock_subsys = (clock_control_subsys_t) DT_INST_PHA(\
-								0, clocks, clkid),   \
+								n, clocks, clkid),   \
 			)                                                            \
 		)                                                                    \
 		IF_ENABLED(DT_INST_NODE_HAS_PROP(n, pcp),                            \

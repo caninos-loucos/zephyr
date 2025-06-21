@@ -65,6 +65,7 @@ while the ``*_hex`` version returns a hexadecimal value starting with ``0x``.
    $(dt_nodelabel_bool_prop,<node label>,<prop>)
    $(dt_nodelabel_enabled,<node label>)
    $(dt_nodelabel_enabled_with_compat,<node label>,<compatible string>)
+   $(dt_nodelabel_exists,<node label>)
    $(dt_nodelabel_has_compat,<node label>,<compatible string>)
    $(dt_nodelabel_has_prop,<node label>,<prop>)
    $(dt_nodelabel_path,<node label>)
@@ -80,18 +81,29 @@ Integer functions
 
 The functions listed below can be used to do arithmetic operations
 on integer variables, such as addition, subtraction and more.
+Functions with and without the ``_hex`` suffix in their names
+return hexadecimal and decimal values respectively.
 
 .. code-block:: none
 
    $(add,<value>[,value]...)
+   $(add_hex,<value>[,value]...)
    $(dec,<value>[,value]...)
+   $(dec_hex,<value>[,value]...)
    $(div,<value>[,value]...)
+   $(div_hex,<value>[,value]...)
    $(inc,<value>[,value]...)
+   $(inc_hex,<value>[,value]...)
    $(max,<value>[,value]...)
+   $(max_hex,<value>[,value]...)
    $(min,<value>[,value]...)
+   $(min_hex,<value>[,value]...)
    $(mod,<value>[,value]...)
+   $(mod_hex,<value>[,value]...)
    $(mul,<value>[,value]...)
+   $(mul_hex,<value>[,value]...)
    $(sub,<value>[,value]...)
+   $(sub_hex,<value>[,value]...)
 
 
 String functions

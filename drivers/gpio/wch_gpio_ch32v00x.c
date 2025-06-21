@@ -10,7 +10,7 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/irq.h>
 
-#include <ch32fun.h>
+#include <hal_ch32fun.h>
 
 #define DT_DRV_COMPAT wch_gpio
 
@@ -53,7 +53,12 @@ static int gpio_ch32v00x_configure(const struct device *dev, gpio_pin_t pin, gpi
 		cnf_mode = 0x00;
 	}
 
-	regs->CFGLR = (regs->CFGLR & ~(0x0F << (4 * pin))) | (cnf_mode << (4 * pin));
+	if (pin < 8) {
+		regs->CFGLR = (regs->CFGLR & ~(0x0F << (4 * pin))) | (cnf_mode << (4 * pin));
+	} else {
+		regs->CFGHR =
+			(regs->CFGHR & ~(0x0F << ((pin - 8) * 4))) | (cnf_mode << ((pin - 8) * 4));
+	}
 	regs->BSHR = bshr;
 
 	return 0;
@@ -99,9 +104,9 @@ static int gpio_ch32v00x_port_clear_bits_raw(const struct device *dev, uint32_t 
 static int gpio_ch32v00x_port_toggle_bits(const struct device *dev, uint32_t pins)
 {
 	const struct gpio_ch32v00x_config *config = dev->config;
-	uint32_t changed = (config->regs->OUTDR ^ pins) & pins;
+	uint32_t current = config->regs->OUTDR;
 
-	config->regs->BSHR = (changed & pins) | (~changed & pins) << 16;
+	config->regs->BSHR = (~current & pins) | (current & pins) << 16;
 
 	return 0;
 }

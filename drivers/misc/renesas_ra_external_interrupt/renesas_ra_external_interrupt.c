@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Renesas Electronics Corporation
+ * Copyright (c) 2024-2025 Renesas Electronics Corporation
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -107,7 +107,7 @@ void gpio_ra_interrupt_unset(const struct device *dev, uint8_t port_num, uint8_t
 	const struct gpio_ra_irq_config *config = dev->config;
 	struct gpio_ra_irq_data *data = dev->data;
 
-	if ((port_num != data->callback.port_num) && (pin != data->callback.pin)) {
+	if ((port_num != data->callback.port_num) || (pin != data->callback.pin)) {
 		return;
 	}
 
@@ -152,7 +152,7 @@ static int gpio_ra_interrupt_init(const struct device *dev)
 	static int gpio_ra_irq_init##index(const struct device *dev)                               \
 	{                                                                                          \
 		R_ICU->IELSR[DT_INST_IRQ(index, irq)] =                                            \
-			UTIL_CAT(ELC_EVENT_ICU_IRQ, DT_INST_PROP(index, channel));                 \
+			BSP_PRV_IELS_ENUM(UTIL_CAT(EVENT_ICU_IRQ, DT_INST_PROP(index, channel)));  \
 		IRQ_CONNECT(DT_INST_IRQ(index, irq), DT_INST_IRQ(index, priority), gpio_ra_isr,    \
 			    DEVICE_DT_INST_GET(index), 0);                                         \
 		return gpio_ra_interrupt_init(dev);                                                \

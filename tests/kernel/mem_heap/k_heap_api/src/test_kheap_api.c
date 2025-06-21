@@ -72,7 +72,7 @@ K_HEAP_DEFINE(tiny_heap, 1);
 volatile uint32_t heap_guard1;
 
 /** @brief Test a minimum-size static k_heap
- *  @ingroup kernel_kheap_api_tests
+ *  @ingroup k_heap_api_tests
  *
  * @details Create a minimum size (1-byte) static heap, verify that it
  * works to allocate that byte at runtime and that it doesn't overflow
@@ -105,7 +105,7 @@ ZTEST(k_heap_api, test_k_heap_min_size)
 /**
  * @brief Test to demonstrate k_heap_alloc() and k_heap_free() API usage
  *
- * @ingroup kernel_kheap_api_tests
+ * @ingroup k_heap_api_tests
  *
  * @details The test allocates 1024 bytes from 2048 byte heap,
  * and checks if allocation is successful or not
@@ -129,7 +129,7 @@ ZTEST(k_heap_api, test_k_heap_alloc)
 /**
  * @brief Test to demonstrate k_heap_alloc() and k_heap_free() API usage
  *
- * @ingroup kernel_kheap_api_tests
+ * @ingroup k_heap_api_tests
  *
  * @details The test allocates 2049 bytes, which is greater than the heap
  * size(2048 bytes), and checks for NULL return from k_heap_alloc
@@ -151,7 +151,7 @@ ZTEST(k_heap_api, test_k_heap_alloc_fail)
 /**
  * @brief Test to demonstrate k_heap_free() API functionality.
  *
- * @ingroup kernel_kheap_api_tests
+ * @ingroup k_heap_api_tests
  *
  * @details The test validates k_heap_free()
  * API, by using below steps
@@ -184,7 +184,7 @@ ZTEST(k_heap_api, test_k_heap_free)
  * @details The test validates k_heap_alloc() in isr context, the timeout
  * param should be K_NO_WAIT, because this situation isn't allow to wait.
  *
- * @ingroup kernel_heap_tests
+ * @ingroup k_heap_api_tests
  */
 ZTEST(k_heap_api, test_kheap_alloc_in_isr_nowait)
 {
@@ -198,7 +198,7 @@ ZTEST(k_heap_api, test_kheap_alloc_in_isr_nowait)
  * child thread. If there isn't enough space in the heap, the child thread
  * will wait timeout long until main thread free the buffer to heap.
  *
- * @ingroup kernel_heap_tests
+ * @ingroup k_heap_api_tests
  */
 ZTEST(k_heap_api, test_k_heap_alloc_pending)
 {
@@ -235,7 +235,7 @@ ZTEST(k_heap_api, test_k_heap_alloc_pending)
  * will wait timeout long until main thread free one of the buffer to heap, space in
  * the heap is still not enough and then return null after timeout.
  *
- * @ingroup kernel_heap_tests
+ * @ingroup k_heap_api_tests
  */
 ZTEST(k_heap_api, test_k_heap_alloc_pending_null)
 {
@@ -271,7 +271,7 @@ ZTEST(k_heap_api, test_k_heap_alloc_pending_null)
 /**
  * @brief Test to demonstrate k_heap_calloc() and k_heap_free() API usage
  *
- * @ingroup kernel_kheap_api_tests
+ * @ingroup k_heap_api_tests
  *
  * @details The test allocates 256 unsigned integers of 4 bytes for a
  * total of 1024 bytes from the 2048 byte heap. It checks if allocation
@@ -290,4 +290,32 @@ ZTEST(k_heap_api, test_k_heap_calloc)
 	}
 
 	k_heap_free(&k_heap_test, p);
+}
+
+/**
+ * @brief Test to demonstrate k_heap_array_get()
+ *
+ * @ingroup kernel_kheap_api_tests
+ *
+ * @details The test ensures that valid values are returned
+ *
+ * @see k_heap_array_get()
+ */
+ZTEST(k_heap_api, test_k_heap_array_get)
+{
+	struct k_heap *ha = NULL;
+	bool test_heap_found = false;
+	int n;
+
+	n = k_heap_array_get(&ha);
+	zassert_not_equal(0, n, "No heaps returned");
+	zassert_not_null(ha, "Heap array pointer not populated");
+
+	/* Ensure that k_heap_test exists in the array */
+	for (int i = 0; i < n; i++) {
+		if (&k_heap_test == &ha[i]) {
+			test_heap_found = true;
+		}
+	}
+	zassert_true(test_heap_found);
 }
