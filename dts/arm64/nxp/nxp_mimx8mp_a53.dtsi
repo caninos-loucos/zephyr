@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2022,2024 NXP
+ * Copyright 2020-2022, 2024-2025 NXP
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -189,6 +189,106 @@
 			status = "disabled";
 		};
 
+		flexcan1: can@308c0000 {
+			compatible = "nxp,flexcan-fd", "nxp,flexcan";
+			reg = <0x308c0000 DT_SIZE_K(64)>;
+			interrupt-parent= <&gic>;
+			interrupts = <GIC_SPI 142 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>,
+						<GIC_SPI 143 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-names = "common", "error";
+			clocks = <&ccm IMX_CCM_CAN1_CLK 0x68 14>;
+			clk-source = <0>;
+			rdc = <(RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)|\
+			       RDC_DOMAIN_PERM(M7_DOMAIN_ID, RDC_DOMAIN_PERM_RW))>;
+			status = "disabled";
+		};
+
+		flexcan2: can@308d0000 {
+			compatible = "nxp,flexcan-fd", "nxp,flexcan";
+			reg = <0x308d0000 DT_SIZE_K(64)>;
+			interrupt-parent= <&gic>;
+			interrupts = <GIC_SPI 144 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>,
+						<GIC_SPI 145 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-names = "common", "error";
+			clocks = <&ccm IMX_CCM_CAN2_CLK 0x68 14>;
+			clk-source = <0>;
+			rdc = <(RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)|\
+			       RDC_DOMAIN_PERM(M7_DOMAIN_ID, RDC_DOMAIN_PERM_RW))>;
+			status = "disabled";
+		};
+
+		i2c1: i2c@30a20000 {
+			compatible = "nxp,ii2c";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x30a20000 0x10000>;
+			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-parent = <&gic>;
+			clocks = <&ccm IMX_CCM_I2C1_CLK 0 0>;
+			rdc = <RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)>;
+			status = "disabled";
+		};
+
+		i2c2: i2c@30a30000 {
+			compatible = "nxp,ii2c";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x30a30000 0x10000>;
+			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-parent = <&gic>;
+			clocks = <&ccm IMX_CCM_I2C2_CLK 0 0>;
+			rdc = <RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)>;
+			status = "disabled";
+		};
+
+		i2c3: i2c@30a40000 {
+			compatible = "nxp,ii2c";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x30a40000 0x10000>;
+			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-parent = <&gic>;
+			clocks = <&ccm IMX_CCM_I2C3_CLK 0 0>;
+			rdc = <RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)>;
+			status = "disabled";
+		};
+
+		i2c4: i2c@30a50000 {
+			compatible = "nxp,ii2c";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x30a50000 0x10000>;
+			interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-parent = <&gic>;
+			clocks = <&ccm IMX_CCM_I2C4_CLK 0 0>;
+			rdc = <RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)>;
+			status = "disabled";
+		};
+
+		i2c5: i2c@30ad0000 {
+			compatible = "nxp,ii2c";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x30ad0000 0x10000>;
+			interrupts = <GIC_SPI 76 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-parent = <&gic>;
+			clocks = <&ccm IMX_CCM_I2C5_CLK 0 0>;
+			rdc = <RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)>;
+			status = "disabled";
+		};
+
+		i2c6: i2c@30ae0000 {
+			compatible = "nxp,ii2c";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x30ae0000 0x10000>;
+			interrupts = <GIC_SPI 77 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			interrupt-parent = <&gic>;
+			clocks = <&ccm IMX_CCM_I2C6_CLK 0 0>;
+			rdc = <RDC_DOMAIN_PERM(A53_DOMAIN_ID, RDC_DOMAIN_PERM_RW)>;
+			status = "disabled";
+		};
+
 		enet: enet@30be0000 {
 			compatible = "nxp,enet1g";
 			reg = <0x30be0000 DT_SIZE_K(64)>;
@@ -202,7 +302,7 @@
 				interrupt-names = "COMMON";
 				interrupt-parent = <&gic>;
 				nxp,mdio = <&enet_mdio>;
-				nxp,ptp-clock = <&enet_ptp_clock>;
+				ptp-clock = <&enet_ptp_clock>;
 				status = "disabled";
 			};
 			enet_mdio: mdio {

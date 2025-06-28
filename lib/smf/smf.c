@@ -148,8 +148,6 @@ static bool smf_execute_ancestor_run_actions(struct smf_ctx *ctx)
 
 	/* The child state either transitioned or handled it. Either way, stop propagating. */
 	if (internal->new_state || internal->handled) {
-		internal->new_state = false;
-		internal->handled = false;
 		return false;
 	}
 
@@ -160,7 +158,11 @@ static bool smf_execute_ancestor_run_actions(struct smf_ctx *ctx)
 		ctx->executing = tmp_state;
 		/* Execute parent run action */
 		if (tmp_state->run) {
-			tmp_state->run(ctx);
+			enum smf_state_result rc = tmp_state->run(ctx);
+
+			if (rc == SMF_EVENT_HANDLED) {
+				internal->handled = true;
+			}
 			/* No need to continue if terminate was set */
 			if (internal->terminate) {
 				return true;
@@ -172,9 +174,6 @@ static bool smf_execute_ancestor_run_actions(struct smf_ctx *ctx)
 			}
 		}
 	}
-
-	internal->new_state = false;
-	internal->handled = false;
 
 	/* All done executing the run actions */
 
@@ -193,8 +192,7 @@ static bool smf_execute_all_exit_actions(struct smf_ctx *const ctx, const struct
 	struct internal_ctx *const internal = (void *)&ctx->internal;
 
 	for (const struct smf_state *to_execute = ctx->current;
-	     to_execute != NULL && to_execute != topmost;
-	     to_execute = to_execute->parent) {
+	     to_execute != NULL && to_execute != topmost; to_execute = to_execute->parent) {
 		if (to_execute->exit) {
 			to_execute->exit(ctx);
 
@@ -209,10 +207,24 @@ static bool smf_execute_all_exit_actions(struct smf_ctx *const ctx, const struct
 }
 #endif /* CONFIG_SMF_ANCESTOR_SUPPORT */
 
-void smf_set_initial(struct smf_ctx *ctx, const struct smf_state *init_state)
+/**
+ * @brief Reset the internal state of the state machine back to default values.
+ * Should be called on entry to smf_set_initial() and smf_set_state().
+ *
+ * @param ctx State machine context.
+ */
+static void smf_clear_internal_state(struct smf_ctx *ctx)
 {
 	struct internal_ctx *const internal = (void *)&ctx->internal;
 
+	internal->is_exit = false;
+	internal->terminate = false;
+	internal->handled = false;
+	internal->new_state = false;
+}
+
+void smf_set_initial(struct smf_ctx *ctx, const struct smf_state *init_state)
+{
 #ifdef CONFIG_SMF_INITIAL_TRANSITION
 	/*
 	 * The final target will be the deepest leaf state that
@@ -223,15 +235,14 @@ void smf_set_initial(struct smf_ctx *ctx, const struct smf_state *init_state)
 	}
 #endif
 
-	internal->is_exit = false;
-	internal->terminate = false;
-	internal->handled = false;
-	internal->new_state = false;
+	smf_clear_internal_state(ctx);
 	ctx->current = init_state;
 	ctx->previous = NULL;
 	ctx->terminate_val = 0;
 
 #ifdef CONFIG_SMF_ANCESTOR_SUPPORT
+	struct internal_ctx *const internal = (void *)&ctx->internal;
+
 	ctx->executing = init_state;
 	const struct smf_state *topmost = get_last_of(init_state);
 
@@ -373,13 +384,6 @@ void smf_set_terminate(struct smf_ctx *ctx, int32_t val)
 	ctx->terminate_val = val;
 }
 
-void smf_set_handled(struct smf_ctx *ctx)
-{
-	struct internal_ctx *const internal = (void *)&ctx->internal;
-
-	internal->handled = true;
-}
-
 int32_t smf_run_state(struct smf_ctx *const ctx)
 {
 	struct internal_ctx *const internal = (void *)&ctx->internal;
@@ -389,15 +393,29 @@ int32_t smf_run_state(struct smf_ctx *const ctx)
 		return ctx->terminate_val;
 	}
 
+	/* Executing a states run function could cause a transition, so clear the
+	 * internal state to ensure that the transition is handled correctly.
+	 */
+	smf_clear_internal_state(ctx);
+
 #ifdef CONFIG_SMF_ANCESTOR_SUPPORT
 	ctx->executing = ctx->current;
 #endif
 
+#ifndef CONFIG_SMF_ANCESTOR_SUPPORT
 	if (ctx->current->run) {
 		ctx->current->run(ctx);
 	}
+#else
+	ctx->executing = ctx->current;
+	if (ctx->current->run) {
+		enum smf_state_result rc = ctx->current->run(ctx);
 
-#ifdef CONFIG_SMF_ANCESTOR_SUPPORT
+		if (rc == SMF_EVENT_HANDLED) {
+			internal->handled = true;
+		}
+	}
+
 	if (smf_execute_ancestor_run_actions(ctx)) {
 		return ctx->terminate_val;
 	}
