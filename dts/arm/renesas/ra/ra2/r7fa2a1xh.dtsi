@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2024 TOKITA Hiroshi
+ * Copyright (c) 2025 Renesas Electronics Corporation
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -7,6 +8,7 @@
 #include <arm/renesas/ra/ra2/ra2xx.dtsi>
 #include <zephyr/dt-bindings/clock/ra_clock.h>
 #include <zephyr/dt-bindings/pwm/ra_pwm.h>
+#include <zephyr/dt-bindings/misc/renesas/ra-elc/ra2a1-elc.h>
 
 /delete-node/ &sci2;
 /delete-node/ &sci3;
@@ -91,6 +93,13 @@
 			compatible = "renesas,ra-trng";
 			status = "disabled";
 		};
+
+		wdt: wdt@40044200 {
+			compatible = "renesas,ra-wdt";
+			reg = <0x40044200 0x200>;
+			clocks = <&pclkb 0 0>;
+			status = "disabled";
+		};
 	};
 
 	clocks: clocks {
@@ -141,6 +150,7 @@
 
 			iclk: iclk {
 				compatible = "renesas,ra-cgc-pclk";
+				clock-frequency = <48000000>;
 				div = <1>;
 				#clock-cells = <2>;
 				status = "okay";
@@ -173,8 +183,13 @@
 				status = "disabled";
 			};
 
-
 			sdadcclk: sdadcclk {
+				compatible = "renesas,ra-cgc-pclk";
+				#clock-cells = <2>;
+				status = "disabled";
+			};
+
+			uclk: uclk {
 				compatible = "renesas,ra-cgc-pclk";
 				#clock-cells = <2>;
 				status = "disabled";
@@ -250,4 +265,9 @@
 	port-irq1-pins = <2>;
 	port-irq2-pins = <1>;
 	port-irq3-pins = <0>;
+};
+
+&dac_global {
+	has-chargepump;
+	has-davrefcr;
 };

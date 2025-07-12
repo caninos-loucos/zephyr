@@ -116,16 +116,19 @@ static const uint32_t ch2ll[TIMER_MAX_CH] = {
 #endif
 };
 
-/** Some stm32 mcus have complementary channels : 3 or 4 */
+/** STM32 MCUs have between 1 and 4 complementary channels */
 static const uint32_t ch2ll_n[] = {
 #if defined(LL_TIM_CHANNEL_CH1N)
 	LL_TIM_CHANNEL_CH1N,
+#if defined(LL_TIM_CHANNEL_CH2N)
 	LL_TIM_CHANNEL_CH2N,
+#if defined(LL_TIM_CHANNEL_CH3N)
 	LL_TIM_CHANNEL_CH3N,
 #if defined(LL_TIM_CHANNEL_CH4N)
-/** stm32g4x and stm32u5x have 4 complementary channels */
 	LL_TIM_CHANNEL_CH4N,
 #endif /* LL_TIM_CHANNEL_CH4N */
+#endif /* LL_TIM_CHANNEL_CH3N */
+#endif /* LL_TIM_CHANNEL_CH2N */
 #endif /* LL_TIM_CHANNEL_CH1N */
 };
 /** Maximum number of complemented timer channels is ARRAY_SIZE(ch2ll_n)*/
@@ -231,7 +234,10 @@ static int get_tim_clk(const struct stm32_pclken *pclken, uint32_t *tim_clk)
 		return r;
 	}
 
-#if defined(CONFIG_SOC_SERIES_STM32H7X)
+#if defined(CONFIG_SOC_SERIES_STM32WB0X)
+	/* Timers are clocked by SYSCLK on STM32WB0 */
+	apb_psc = 1;
+#elif defined(CONFIG_SOC_SERIES_STM32H7X)
 	if (pclken->bus == STM32_CLOCK_BUS_APB1) {
 		apb_psc = STM32_D2PPRE1;
 	} else {
@@ -241,6 +247,8 @@ static int get_tim_clk(const struct stm32_pclken *pclken, uint32_t *tim_clk)
 	if (pclken->bus == STM32_CLOCK_BUS_APB1) {
 #if defined(CONFIG_SOC_SERIES_STM32MP1X)
 		apb_psc = (uint32_t)(READ_BIT(RCC->APB1DIVR, RCC_APB1DIVR_APB1DIV));
+#elif defined(CONFIG_SOC_SERIES_STM32H7RSX)
+		apb_psc = STM32_PPRE1;
 #else
 		apb_psc = STM32_APB1_PRESCALER;
 #endif
@@ -250,6 +258,8 @@ static int get_tim_clk(const struct stm32_pclken *pclken, uint32_t *tim_clk)
 	else {
 #if defined(CONFIG_SOC_SERIES_STM32MP1X)
 		apb_psc = (uint32_t)(READ_BIT(RCC->APB2DIVR, RCC_APB2DIVR_APB2DIV));
+#elif defined(CONFIG_SOC_SERIES_STM32H7RSX)
+		apb_psc = STM32_PPRE2;
 #else
 		apb_psc = STM32_APB2_PRESCALER;
 #endif
@@ -615,7 +625,6 @@ static int pwm_stm32_enable_capture(const struct device *dev, uint32_t channel)
 
 	LL_TIM_CC_EnableChannel(cfg->timer, ch2ll[channel - 1]);
 	LL_TIM_CC_EnableChannel(cfg->timer, ch2ll[complimentary_channel[channel] - 1]);
-	LL_TIM_EnableIT_UPDATE(cfg->timer);
 	LL_TIM_GenerateEvent_UPDATE(cfg->timer);
 
 	return 0;
@@ -721,6 +730,8 @@ static void pwm_stm32_isr(const struct device *dev)
 			cpt->pulse = get_channel_capture[complimentary_channel[cpt->channel] - 1]
 					(cfg->timer);
 			cpt->period = get_channel_capture[cpt->channel - 1](cfg->timer);
+			/* Reset the counter manually for next cycle */
+			LL_TIM_GenerateEvent_UPDATE(cfg->timer);
 		}
 
 		clear_capture_interrupt[cpt->channel - 1](cfg->timer);
@@ -739,7 +750,7 @@ static void pwm_stm32_isr(const struct device *dev)
 		pwm_stm32_disable_capture(dev, cpt->channel);
 	} else {
 		cpt->overflows = 0u;
-		cpt->state = CAPTURE_STATE_WAIT_FOR_PULSE_START;
+		cpt->state = CAPTURE_STATE_WAIT_FOR_PERIOD_END;
 	}
 
 	if (cpt->callback != NULL) {

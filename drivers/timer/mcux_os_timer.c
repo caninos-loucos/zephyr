@@ -16,12 +16,14 @@
 #include <zephyr/drivers/counter.h>
 #include <zephyr/pm/pm.h>
 #include "fsl_ostimer.h"
-#ifndef CONFIG_SOC_MCXN236
+#if !defined(CONFIG_SOC_SERIES_MCXN) && !defined(CONFIG_SOC_SERIES_MCXA)
 #include "fsl_power.h"
 #endif
 
 #define CYC_PER_TICK ((uint32_t)((uint64_t)sys_clock_hw_cycles_per_sec()	\
 			      / (uint64_t)CONFIG_SYS_CLOCK_TICKS_PER_SEC))
+#define CYC_PER_US ((uint32_t)((uint64_t)sys_clock_hw_cycles_per_sec()	\
+			      / (uint64_t)USEC_PER_SEC))
 #define MAX_CYC INT_MAX
 #define MAX_TICKS ((MAX_CYC - CYC_PER_TICK) / CYC_PER_TICK)
 #define MIN_DELAY 1000
@@ -37,7 +39,12 @@ static OSTIMER_Type *base;
  */
 static uint64_t cyc_sys_compensated;
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(standby)) && CONFIG_PM
+/* This is the counter device used when OS timer is not available in
+ * standby mode.
+ */
 static const struct device *counter_dev;
+/* Indicates if the counter is running. */
+static bool counter_running;
 #endif
 
 static uint64_t mcux_lpc_ostick_get_compensated_timer_value(void)
@@ -83,13 +90,10 @@ static uint32_t mcux_lpc_ostick_set_counter_timeout(int32_t curr_timeout)
 	uint32_t ret = 0;
 
 	if (counter_dev) {
-		uint32_t timeout;
-		int32_t ticks;
+		uint32_t ticks;
 		struct counter_top_cfg top_cfg = { 0 };
 
-		timeout = k_ticks_to_us_ceil32(curr_timeout);
-
-		ticks = counter_us_to_ticks(counter_dev, timeout);
+		ticks = counter_us_to_ticks(counter_dev, curr_timeout);
 		ticks = CLAMP(ticks, 1, counter_get_max_top_value(counter_dev));
 
 		top_cfg.ticks = ticks;
@@ -111,17 +115,18 @@ static uint32_t mcux_lpc_ostick_set_counter_timeout(int32_t curr_timeout)
 			}
 		}
 
+		/* Counter is set to wakeup the system after the requested time */
+		if (counter_start(counter_dev) != 0) {
+			ret = 1;
+			goto done;
+		}
+		counter_running = true;
 #if CONFIG_MCUX_OS_TIMER_PM_POWERED_OFF
 		/* Capture the current timer value for cases where it loses its state
 		 * in low power modes.
 		 */
 		cyc_sys_compensated += OSTIMER_GetCurrentTimerValue(base);
 #endif
-
-		/* Counter is set to wakeup the system after the requested time */
-		if (counter_start(counter_dev) != 0) {
-			ret = 1;
-		}
 	} else {
 		ret = 1;
 	}
@@ -137,55 +142,70 @@ done:
  */
 static uint32_t mcux_lpc_ostick_compensate_system_timer(void)
 {
-	uint32_t ret = 0;
+	uint32_t slept_time_ticks;
+	uint32_t slept_time_us;
 
-	if (counter_dev) {
-		uint32_t slept_time_ticks;
-		uint32_t slept_time_us;
-
-		counter_stop(counter_dev);
-
-		counter_get_value(counter_dev, &slept_time_ticks);
-
-		if (!(counter_is_counting_up(counter_dev))) {
-			slept_time_ticks = counter_get_top_value(counter_dev) - slept_time_ticks;
-		}
-		slept_time_us = counter_ticks_to_us(counter_dev, slept_time_ticks);
-		cyc_sys_compensated += (k_us_to_ticks_floor32(slept_time_us) * CYC_PER_TICK);
-
-#if CONFIG_MCUX_OS_TIMER_PM_POWERED_OFF
-		/* Reactivate os_timer for cases where it loses its state */
-		OSTIMER_Init(base);
-#endif
-
-		/* Announce the time slept to the kernel*/
-		mcux_lpc_ostick_isr(NULL);
-	} else {
-		ret = 1;
+	if (!counter_dev) {
+		return 1;
 	}
 
-	return ret;
+	if (!counter_running) {
+		return 0;
+	}
+
+	counter_stop(counter_dev);
+	counter_running = false;
+	counter_get_value(counter_dev, &slept_time_ticks);
+
+	if (!(counter_is_counting_up(counter_dev))) {
+		slept_time_ticks = counter_get_top_value(counter_dev) -
+				   slept_time_ticks;
+	}
+	slept_time_us = counter_ticks_to_us(counter_dev, slept_time_ticks);
+	cyc_sys_compensated += CYC_PER_US * slept_time_us;
+#if CONFIG_MCUX_OS_TIMER_PM_POWERED_OFF
+	/* Reset the OS Timer to a known state */
+	RESET_PeripheralReset(kOSEVENT_TIMER_RST_SHIFT_RSTn);
+	/* Reactivate os_timer for cases where it loses its state */
+	OSTIMER_Init(base);
+#endif
+	/* Announce the time slept to the kernel*/
+	mcux_lpc_ostick_isr(NULL);
+
+	return 0;
 }
 
 #endif
 
 void sys_clock_set_timeout(int32_t ticks, bool idle)
 {
-	ARG_UNUSED(idle);
-
 	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
 		/* Only for tickless kernel system */
 		return;
 	}
 
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(standby)) && CONFIG_PM
-	if (idle) {
+	/* We intercept calls from idle with a 0 tick count */
+	if (idle && ticks == 0) {
 		/* OS Timer may not be able to wakeup in certain low power modes.
 		 * For these cases, we start a counter that can wakeup
 		 * from low power modes.
 		 */
 		if (pm_state_next_get(0)->state == PM_STATE_STANDBY) {
-			if (mcux_lpc_ostick_set_counter_timeout(ticks) == 0) {
+			uint64_t timeout;
+
+			/* Check the amount of time left and switch to a counter
+			 * that is active in this power mode.
+			 */
+			timeout = base->MATCH_L;
+			timeout |= (uint64_t)(base->MATCH_H) << 32;
+			timeout = OSTIMER_GrayToDecimal(timeout);
+			timeout -= OSTIMER_GetCurrentTimerValue(base);
+			/* Round up to the next tick boundary */
+			timeout += (CYC_PER_TICK - 1);
+			/* Convert to microseconds and round up to the next value */
+			timeout = (((timeout / CYC_PER_TICK) * CYC_PER_TICK) * CYC_PER_US);
+			if (mcux_lpc_ostick_set_counter_timeout(timeout) == 0) {
 				/* A low power counter has been started. No need to
 				 * go further, simply return
 				 */
@@ -193,6 +213,8 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 			}
 		}
 	}
+#else
+	ARG_UNUSED(idle);
 #endif
 
 	ticks = ticks == K_TICKS_FOREVER ? MAX_TICKS : ticks;

@@ -490,18 +490,24 @@ static void esp_dns_work(struct k_work *work)
 	struct dns_resolve_context *dnsctx;
 	struct sockaddr_in *addrs = data->dns_addresses;
 	const struct sockaddr *dns_servers[ESP_MAX_DNS + 1] = {};
+	int interfaces[ESP_MAX_DNS];
 	size_t i;
-	int err;
+	int err, ifindex;
+
+	ifindex = net_if_get_by_iface(data->net_iface);
 
 	for (i = 0; i < ESP_MAX_DNS; i++) {
 		if (!addrs[i].sin_addr.s_addr) {
 			break;
 		}
 		dns_servers[i] = (struct sockaddr *) &addrs[i];
+		interfaces[i] = ifindex;
 	}
 
 	dnsctx = dns_resolve_get_default();
-	err = dns_resolve_reconfigure(dnsctx, NULL, dns_servers);
+	err = dns_resolve_reconfigure_with_interfaces(dnsctx, NULL, dns_servers,
+						      interfaces,
+						      DNS_SOURCE_MANUAL);
 	if (err) {
 		LOG_ERR("Could not set DNS servers: %d", err);
 	}
@@ -825,7 +831,13 @@ static int cmd_ipd_parse_hdr(struct esp_data *dev,
 		char *remote_ip;
 		long port;
 
-		err = esp_pull_quoted(&str, str_end, &remote_ip);
+		if (IS_ENABLED(CONFIG_WIFI_ESP_AT_VERSION_1_7)) {
+			/* NOT quoted per AT version 1.7.0 */
+			err = esp_pull_raw(&str, str_end, &remote_ip);
+		} else {
+			/* Quoted per AT version 2.1.0/2.2.0 */
+			err = esp_pull_quoted(&str, str_end, &remote_ip);
+		}
 		if (err) {
 			if (err == -EAGAIN && match_len >= MAX_IPD_LEN) {
 				LOG_ERR("Failed to pull remote_ip");

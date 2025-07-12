@@ -19,10 +19,13 @@
 #include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/iso.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/types.h>
 
 bool bt_cap_acceptor_ccid_exist(const struct bt_conn *conn, uint8_t ccid);
+bool bt_cap_acceptor_ccids_exist(const struct bt_conn *conn, const uint8_t ccids[],
+				 uint8_t ccid_cnt);
 
 void bt_cap_initiator_codec_configured(struct bt_cap_stream *cap_stream);
 void bt_cap_initiator_qos_configured(struct bt_cap_stream *cap_stream);
@@ -113,7 +116,7 @@ struct cap_broadcast_reception_stop {
 
 /* Note that although the broadcast_code will be the same for all
  * we nevertheless store a separate copy for each sink, for
- * consistensy in the struct bt_cap_commander_proc_param
+ * consistency in the struct bt_cap_commander_proc_param
  * There is no memory savings by not having broadcast_code part of the
  * union: struct cap_broadcast_reception_start uses minimum 20 bytes
  * and struct cap_distribute_broadcast_code uses 17 bytes
@@ -203,12 +206,13 @@ struct bt_cap_common_client {
 
 struct bt_cap_common_proc *bt_cap_common_get_active_proc(void);
 void bt_cap_common_clear_active_proc(void);
-void bt_cap_common_start_proc(enum bt_cap_common_proc_type proc_type, size_t proc_cnt);
+void bt_cap_common_set_proc(enum bt_cap_common_proc_type proc_type, size_t proc_cnt);
 void bt_cap_common_set_subproc(enum bt_cap_common_subproc_type subproc_type);
 bool bt_cap_common_proc_is_type(enum bt_cap_common_proc_type proc_type);
 bool bt_cap_common_subproc_is_type(enum bt_cap_common_subproc_type subproc_type);
 struct bt_conn *bt_cap_common_get_member_conn(enum bt_cap_set_type type,
 					      const union bt_cap_set_member *member);
+bool bt_cap_common_test_and_set_proc_active(void);
 bool bt_cap_common_proc_is_active(void);
 bool bt_cap_common_proc_is_aborted(void);
 bool bt_cap_common_proc_all_handled(void);

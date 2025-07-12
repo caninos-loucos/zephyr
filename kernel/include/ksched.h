@@ -119,7 +119,7 @@ static inline bool z_is_prio_lower_or_equal(int prio1, int prio2)
 	return z_is_prio1_lower_than_or_equal_to_prio2(prio1, prio2);
 }
 
-static inline bool _is_valid_prio(int prio, void *entry_point)
+static inline bool _is_valid_prio(int prio, k_thread_entry_t entry_point)
 {
 	if ((prio == K_IDLE_PRIO) && z_is_idle_thread_entry(entry_point)) {
 		return true;
@@ -136,16 +136,6 @@ static inline bool _is_valid_prio(int prio, void *entry_point)
 	}
 
 	return true;
-}
-
-static inline void z_sched_lock(void)
-{
-	__ASSERT(!arch_is_in_isr(), "");
-	__ASSERT(_current->base.sched_locked != 1U, "");
-
-	--_current->base.sched_locked;
-
-	compiler_barrier();
 }
 
 static ALWAYS_INLINE _wait_q_t *pended_on_thread(struct k_thread *thread)

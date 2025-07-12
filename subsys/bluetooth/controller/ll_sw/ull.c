@@ -221,6 +221,9 @@
 				   FLASH_TICKER_NODES + \
 				   COEX_TICKER_NODES)
 
+/* Ticker implementation supports up to 255 ticker node count value */
+BUILD_ASSERT(TICKER_NODES <= UINT8_MAX);
+
 /* When both central and peripheral are supported, one each Rx node will be
  * needed by connectable advertising and the initiator to generate connection
  * complete event, hence conditionally set the count.
@@ -425,8 +428,7 @@ static MFIFO_DEFINE(pdu_rx_free, sizeof(void *), PDU_RX_CNT);
 #define PDU_ADV_SIZE  MAX(PDU_AC_LL_SIZE_MAX, \
 			  (PDU_AC_LL_HEADER_SIZE + LL_EXT_OCTETS_RX_MAX))
 
-#define PDU_DATA_SIZE MAX((PDU_DC_LL_HEADER_SIZE + LL_LENGTH_OCTETS_RX_MAX), \
-			  (PDU_BIS_LL_HEADER_SIZE + LL_BIS_OCTETS_RX_MAX))
+#define PDU_DATA_SIZE (PDU_DC_LL_HEADER_SIZE + LL_LENGTH_OCTETS_RX_MAX)
 
 #define PDU_CTRL_SIZE (PDU_DC_LL_HEADER_SIZE + PDU_DC_CTRL_RX_SIZE_MAX)
 
@@ -541,7 +543,7 @@ static void *mark_update;
 #endif /* CONFIG_BT_CONN */
 
 static MFIFO_DEFINE(tx_ack, sizeof(struct lll_tx),
-		    BT_CTLR_TX_BUFFERS + BT_CTLR_ISO_TX_BUFFERS);
+		    BT_CTLR_TX_BUFFERS + BT_CTLR_ISO_TX_PDU_BUFFERS);
 #endif /* CONFIG_BT_CONN || CONFIG_BT_CTLR_ADV_ISO */
 
 static void *mark_disable;
@@ -781,8 +783,18 @@ int ll_init(struct k_sem *sem_rx)
 
 int ll_deinit(void)
 {
+	int err;
+
 	ll_reset();
-	return lll_deinit();
+
+	err = lll_deinit();
+	if (err) {
+		return err;
+	}
+
+	err = ticker_deinit(TICKER_INSTANCE_ID_CTLR);
+
+	return err;
 }
 
 void ll_reset(void)
@@ -956,8 +968,8 @@ void ll_reset(void)
 uint8_t ll_rx_get(void **node_rx, uint16_t *handle)
 {
 	struct node_rx_pdu *rx;
-	memq_link_t *link;
 	uint8_t cmplt = 0U;
+	memq_link_t *link;
 
 #if defined(CONFIG_BT_CONN) || \
 	(defined(CONFIG_BT_OBSERVER) && defined(CONFIG_BT_CTLR_ADV_EXT)) || \
@@ -971,6 +983,20 @@ ll_rx_get_again:
 	*/
 
 	*node_rx = NULL;
+
+#if defined(CONFIG_BT_CONN) || defined(CONFIG_BT_CTLR_ADV_ISO)
+	/* Save the tx_ack FIFO's last index to avoid the value being changed if there were no
+	 * Rx PDUs and we were pre-empted before calling `tx_cmplt_get()`, that may advance the
+	 * first index beyond ack_last value recorded in node_rx enqueued by `ll_rx_put()` call
+	 * when we are in the `else` clause below.
+	 */
+	uint8_t tx_ack_last = mfifo_fifo_tx_ack.l;
+
+	/* Ensure that the value is fetched before call to memq_peek, i.e. compiler shall not
+	 * reorder memory write before above read.
+	 */
+	cpu_dmb();
+#endif /* CONFIG_BT_CONN || CONFIG_BT_CTLR_ADV_ISO */
 
 	link = memq_peek(memq_ll_rx.head, memq_ll_rx.tail, (void **)&rx);
 	if (link) {
@@ -1052,8 +1078,11 @@ ll_rx_get_again:
 #if defined(CONFIG_BT_CONN) || defined(CONFIG_BT_CTLR_ADV_ISO)
 		}
 	} else {
-		cmplt = tx_cmplt_get(handle, &mfifo_fifo_tx_ack.f,
-				     mfifo_fifo_tx_ack.l);
+		/* Use the saved ack last value, before call was done to memq_peek, to ensure we
+		 * do not advance the first index `f` beyond the value that was the last index `l`
+		 * when memq_peek was called.
+		 */
+		cmplt = tx_cmplt_get(handle, &mfifo_fifo_tx_ack.f, tx_ack_last);
 #endif /* CONFIG_BT_CONN || CONFIG_BT_CTLR_ADV_ISO */
 	}
 
@@ -1684,6 +1713,7 @@ void ll_rx_mem_release(void **node_rx)
 				memq_link_t *link;
 
 				conn = ll_conn_get(rx_free->hdr.handle);
+				LL_ASSERT(conn != NULL);
 
 				LL_ASSERT(!conn->lll.link_tx_free);
 				link = memq_deinit(&conn->lll.memq_tx.head,
@@ -2866,6 +2896,8 @@ static inline void rx_demux_rx(memq_link_t *link, struct node_rx_hdr *rx)
 		(void)memq_dequeue(memq_ull_rx.tail, &memq_ull_rx.head, NULL);
 
 		conn = ll_conn_get(rx->handle);
+		LL_ASSERT(conn != NULL);
+
 		if (ull_cp_cc_awaiting_established(conn)) {
 			ull_cp_cc_established(conn, BT_HCI_ERR_SUCCESS);
 		}

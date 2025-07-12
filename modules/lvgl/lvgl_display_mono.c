@@ -9,6 +9,8 @@
 #include <string.h>
 #include "lvgl_display.h"
 
+#define COLOR_PALETTE_HEADER_SIZE (8)
+
 static uint8_t *mono_conv_buf;
 static uint32_t mono_conv_buf_size;
 
@@ -36,22 +38,31 @@ static ALWAYS_INLINE void set_px_at_pos(uint8_t *dst_buf, uint32_t x, uint32_t y
 		}
 	}
 
+#ifdef CONFIG_LV_Z_COLOR_MONO_HW_INVERSION
+	*buf |= BIT(bit);
+#else
 	if (caps->current_pixel_format == PIXEL_FORMAT_MONO10) {
 		*buf |= BIT(bit);
 	} else {
 		*buf &= ~BIT(bit);
 	}
+#endif
 }
 
 static void lvgl_transform_buffer(uint8_t **px_map, uint32_t width, uint32_t height,
 				  const struct display_capabilities *caps)
 {
+#ifdef CONFIG_LV_Z_COLOR_MONO_HW_INVERSION
+	uint8_t clear_color = 0x00;
+#else
 	uint8_t clear_color = caps->current_pixel_format == PIXEL_FORMAT_MONO10 ? 0x00 : 0xFF;
+#endif
 
 	memset(mono_conv_buf, clear_color, mono_conv_buf_size);
 
-	/* Needed because LVGL reserves 2x4 bytes in the buffer for the color palette. */
-	*px_map += 8;
+	/* Needed because LVGL reserves some bytes in the buffer for the color palette. */
+	*px_map += COLOR_PALETTE_HEADER_SIZE;
+
 	uint8_t *src_buf = *px_map;
 	uint32_t stride = (width + CONFIG_LV_DRAW_BUF_STRIDE_ALIGN - 1) &
 			  ~(CONFIG_LV_DRAW_BUF_STRIDE_ALIGN - 1);
@@ -67,7 +78,7 @@ static void lvgl_transform_buffer(uint8_t **px_map, uint32_t width, uint32_t hei
 		}
 	}
 
-	memcpy(src_buf, mono_conv_buf, mono_conv_buf_size);
+	memcpy(src_buf, mono_conv_buf, mono_conv_buf_size - COLOR_PALETTE_HEADER_SIZE);
 }
 
 void lvgl_flush_cb_mono(lv_display_t *display, const lv_area_t *area, uint8_t *px_map)
