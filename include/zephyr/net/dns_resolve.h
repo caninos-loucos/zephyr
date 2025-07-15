@@ -15,6 +15,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_ip.h>
+#include <zephyr/net/net_if.h>
 #include <zephyr/net/socket_poll.h>
 #include <zephyr/net/net_core.h>
 
@@ -37,21 +38,47 @@ extern "C" {
 enum dns_query_type {
 	/** IPv4 query */
 	DNS_QUERY_TYPE_A = 1,
+	/** PTR query */
+	DNS_QUERY_TYPE_PTR = 12,
 	/** IPv6 query */
 	DNS_QUERY_TYPE_AAAA = 28
 };
 
+/**
+ * Entity that added the DNS server.
+ */
+enum dns_server_source {
+	/** Source is unknown */
+	DNS_SOURCE_UNKNOWN = 0,
+	/** Server information is added manually, for example by an application */
+	DNS_SOURCE_MANUAL,
+	/** Server information is from DHCPv4 server */
+	DNS_SOURCE_DHCPV4,
+	/** Server information is from DHCPv6 server */
+	DNS_SOURCE_DHCPV6,
+	/** Server information is from IPv6 SLAAC (router advertisement) */
+	DNS_SOURCE_IPV6_RA,
+	/** Server information is from PPP */
+	DNS_SOURCE_PPP,
+};
+
 /** Max size of the resolved name. */
-#ifndef DNS_MAX_NAME_SIZE
+#if defined(CONFIG_DNS_RESOLVER_MAX_NAME_LEN)
+#define DNS_MAX_NAME_SIZE CONFIG_DNS_RESOLVER_MAX_NAME_LEN
+#else
 #define DNS_MAX_NAME_SIZE 20
-#endif
+#endif /* CONFIG_DNS_RESOLVER_MAX_NAME_LEN */
 
 /** @cond INTERNAL_HIDDEN */
 
 #define DNS_BUF_TIMEOUT K_MSEC(500) /* ms */
 
 /* This value is recommended by RFC 1035 */
-#define DNS_RESOLVER_MAX_BUF_SIZE	512
+#if defined(CONFIG_DNS_RESOLVER_MAX_ANSWER_SIZE)
+#define DNS_RESOLVER_MAX_BUF_SIZE CONFIG_DNS_RESOLVER_MAX_ANSWER_SIZE
+#else
+#define DNS_RESOLVER_MAX_BUF_SIZE 512
+#endif /* CONFIG_DNS_RESOLVER_MAX_ANSWER_SIZE */
 
 /* Make sure that we can compile things even if CONFIG_DNS_RESOLVER
  * is not enabled.
@@ -156,13 +183,14 @@ enum dns_socket_type {
 
 struct dns_resolve_context;
 struct mdns_responder_context;
+struct dns_socket_dispatcher;
 
 /**
  * @typedef dns_socket_dispatcher_cb
  * @brief Callback used when the DNS socket dispatcher has found a handler for
  * this type of socket.
  *
- * @param ctx DNS resolve or mDNS responder context.
+ * @param ctx struct dns_socket_dispatcher context.
  * @param sock Socket which is seeing traffic.
  * @param addr Socket address of the peer that sent the DNS packet.
  * @param addrlen Length of the socket address.
@@ -171,7 +199,7 @@ struct mdns_responder_context;
  *
  * @return 0 if ok, <0 if error
  */
-typedef int (*dns_socket_dispatcher_cb)(void *ctx, int sock,
+typedef int (*dns_socket_dispatcher_cb)(struct dns_socket_dispatcher *ctx, int sock,
 					struct sockaddr *addr, size_t addrlen,
 					struct net_buf *buf, size_t data_len);
 
@@ -212,13 +240,6 @@ struct dns_socket_dispatcher {
 	struct k_mutex lock;
 	/** Buffer allocation timeout */
 	k_timeout_t buf_timeout;
-};
-
-struct mdns_responder_context {
-	struct sockaddr server_addr;
-	struct dns_socket_dispatcher dispatcher;
-	struct zsock_pollfd fds[1];
-	int sock;
 };
 
 /**
@@ -325,6 +346,7 @@ typedef void (*dns_resolve_cb_t)(enum dns_resolve_status status,
 /** @cond INTERNAL_HIDDEN */
 
 enum dns_resolve_context_state {
+	DNS_RESOLVE_CONTEXT_UNINITIALIZED = 0,
 	DNS_RESOLVE_CONTEXT_ACTIVE,
 	DNS_RESOLVE_CONTEXT_DEACTIVATING,
 	DNS_RESOLVE_CONTEXT_INACTIVE,
@@ -348,6 +370,9 @@ struct dns_resolve_context {
 		 * via this interface. Value 0 indicates any interface can be used.
 		 */
 		int if_index;
+
+		/** Source of the DNS server, e.g., manual, DHCPv4/6, etc. */
+		enum dns_server_source source;
 
 		/** Is this server mDNS one */
 		uint8_t is_mdns : 1;
@@ -431,6 +456,29 @@ struct dns_resolve_context {
 	enum dns_resolve_context_state state;
 };
 
+/** @cond INTERNAL_HIDDEN */
+
+struct mdns_probe_user_data {
+	struct mdns_responder_context *ctx;
+	char query[DNS_MAX_NAME_SIZE + 1];
+	uint16_t dns_id;
+};
+
+struct mdns_responder_context {
+	struct sockaddr server_addr;
+	struct dns_socket_dispatcher dispatcher;
+	struct zsock_pollfd fds[1];
+	int sock;
+	struct net_if *iface;
+#if defined(CONFIG_MDNS_RESPONDER_PROBE)
+	struct k_work_delayable probe_timer;
+	struct dns_resolve_context probe_ctx;
+	struct mdns_probe_user_data probe_data;
+#endif
+};
+
+/** @endcond */
+
 /**
  * @brief Init DNS resolving context.
  *
@@ -499,12 +547,65 @@ int dns_resolve_close(struct dns_resolve_context *ctx);
  * @param servers_sa DNS server addresses as struct sockaddr. The array
  * is NULL terminated. Port numbers are optional in struct sockaddr, the
  * default will be used if set to 0.
+ * @param source Source of the DNS servers, e.g., manual, DHCPv4/6, etc.
  *
  * @return 0 if ok, <0 if error.
  */
 int dns_resolve_reconfigure(struct dns_resolve_context *ctx,
 			    const char *servers_str[],
-			    const struct sockaddr *servers_sa[]);
+			    const struct sockaddr *servers_sa[],
+			    enum dns_server_source source);
+
+/**
+ * @brief Reconfigure DNS resolving context with new server list and
+ *        allowing servers to be specified to a specific network interface.
+ *
+ * @param ctx DNS context
+ * @param servers_str DNS server addresses using textual strings. The
+ *        array is NULL terminated. The port number can be given in the string.
+ *        Syntax for the server addresses with or without port numbers:
+ *           IPv4        : 10.0.9.1
+ *           IPv4 + port : 10.0.9.1:5353
+ *           IPv6        : 2001:db8::22:42
+ *           IPv6 + port : [2001:db8::22:42]:5353
+ * @param servers_sa DNS server addresses as struct sockaddr. The array
+ *        is NULL terminated. Port numbers are optional in struct sockaddr, the
+ *        default will be used if set to 0.
+ * @param interfaces Network interfaces to which the DNS servers are bound.
+ *        This is an array of network interface indices. The array must be
+ *        the same length as the servers_str and servers_sa arrays.
+ * @param source Source of the DNS servers, e.g., manual, DHCPv4/6, etc.
+ *
+ * @return 0 if ok, <0 if error.
+ */
+int dns_resolve_reconfigure_with_interfaces(struct dns_resolve_context *ctx,
+					    const char *servers_str[],
+					    const struct sockaddr *servers_sa[],
+					    int interfaces[],
+					    enum dns_server_source source);
+
+/**
+ * @brief Remove servers from the DNS resolving context.
+ *
+ * @param ctx DNS context
+ * @param if_index Network interface from which the DNS servers are removed.
+ *
+ * @return 0 if ok, <0 if error.
+ */
+int dns_resolve_remove(struct dns_resolve_context *ctx, int if_index);
+
+/**
+ * @brief Remove servers from the DNS resolving context that were added by
+ *        a specific source.
+ *
+ * @param ctx DNS context
+ * @param if_index Network interface from which the DNS servers are removed.
+ * @param source Source of the DNS servers, e.g., manual, DHCPv4/6, etc.
+ *
+ * @return 0 if ok, <0 if error.
+ */
+int dns_resolve_remove_source(struct dns_resolve_context *ctx, int if_index,
+			      enum dns_server_source source);
 
 /**
  * @brief Cancel a pending DNS query.
@@ -570,6 +671,44 @@ int dns_resolve_name(struct dns_resolve_context *ctx,
 		     dns_resolve_cb_t cb,
 		     void *user_data,
 		     int32_t timeout);
+
+/**
+ * @brief Resolve DNS service.
+ *
+ * @details This function can be used to resolve service records needed in
+ * DNS-SD service discovery.
+ * Note that this is an asynchronous call, the function will return immediately
+ * and the system will call the callback after resolving has finished or a timeout
+ * has occurred.
+ * We might send the query to multiple servers (if there are more than one
+ * server configured), but we only use the result of the first received
+ * response.
+ *
+ * @param ctx DNS context
+ * @param query What the caller wants to resolve.
+ * @param dns_id DNS id is returned to the caller. This is needed if one
+ * wishes to cancel the query. This can be set to NULL if there is no need
+ * to cancel the query.
+ * @param cb Callback to call after the resolving has finished or timeout
+ * has happened.
+ * @param user_data The user data.
+ * @param timeout The timeout value for the query. Possible values:
+ * SYS_FOREVER_MS: the query is tried forever, user needs to cancel it
+ *            manually if it takes too long time to finish
+ * >0: start the query and let the system timeout it after specified ms
+ *
+ * @return 0 if resolving was started ok, < 0 otherwise
+ */
+static inline int dns_resolve_service(struct dns_resolve_context *ctx,
+				      const char *query,
+				      uint16_t *dns_id,
+				      dns_resolve_cb_t cb,
+				      void *user_data,
+				      int32_t timeout)
+{
+	return dns_resolve_name(ctx, query, DNS_QUERY_TYPE_PTR,
+				dns_id, cb, user_data, timeout);
+}
 
 /**
  * @brief Get default DNS context.
@@ -645,6 +784,15 @@ static inline int dns_cancel_addr_info(uint16_t dns_id)
  */
 
 /** @cond INTERNAL_HIDDEN */
+
+/**
+ * @brief Get string representation of the DNS server source.
+ *
+ * @param source Source of the DNS server.
+ *
+ * @return String representation of the DNS server source.
+ */
+const char *dns_get_source_str(enum dns_server_source source);
 
 /**
  * @brief Initialize DNS subsystem.

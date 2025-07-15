@@ -5,11 +5,11 @@ arch: arm
 toolchain:
   - zephyr
   - gnuarmemb
-  - xtools
 ram: 512
 flash: 1024
 supported:
   - gpio
   - spi
   - i2c
+  - usbd
 vendor: arduino

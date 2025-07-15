@@ -10,6 +10,7 @@
 #include <openthread/error.h>
 #include <openthread/platform/alarm-milli.h>
 #include <openthread/platform/diag.h>
+#include <openthread/platform/logging.h>
 #include <openthread/platform/radio.h>
 
 #include "platform-zephyr.h"
@@ -37,7 +38,10 @@ static uint32_t sTxPeriod = 1;
 static int32_t sTxCount;
 static int32_t sTxRequestedCount = 1;
 
+#if defined(CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS)
 static otError startModCarrier(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[]);
+#endif /* CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS */
+
 static otError processTransmit(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[]);
 
 static otError parse_long(char *aArgs, long *aValue)
@@ -72,11 +76,11 @@ void otPlatDiagSetOutputCallback(otInstance *aInstance,
 
 otError otPlatDiagProcess(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[])
 {
-#if defined(CONFIG_IEEE802154_CARRIER_FUNCTIONS)
+#if defined(CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS)
 	if (strcmp(aArgs[0], "modcarrier") == 0) {
 		return startModCarrier(aInstance, aArgsLength - 1, aArgs + 1);
 	}
-#endif
+#endif /* CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS */
 
 	if (strcmp(aArgs[0], "transmit") == 0) {
 		return processTransmit(aInstance, aArgsLength - 1, aArgs + 1);
@@ -90,10 +94,16 @@ otError otPlatDiagProcess(otInstance *aInstance, uint8_t aArgsLength, char *aArg
 
 void otPlatDiagModeSet(bool aMode)
 {
+	otError error;
+
 	sDiagMode = aMode;
 
 	if (!sDiagMode) {
-		otPlatRadioSleep(NULL);
+		error = otPlatRadioSleep(NULL);
+		if (error != OT_ERROR_NONE) {
+			otPlatLog(OT_LOG_LEVEL_WARN, OT_LOG_REGION_PLATFORM,
+				  "%s failed (%d)", "otPlatRadioSleep", error);
+		}
 	}
 }
 
@@ -122,11 +132,11 @@ void otPlatDiagRadioReceived(otInstance *aInstance,
 	ARG_UNUSED(aError);
 }
 
-#if defined(CONFIG_IEEE802154_CARRIER_FUNCTIONS)
+#if defined(CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS)
 otError otPlatDiagRadioTransmitCarrier(otInstance *aInstance, bool aEnable)
 {
-	if (!otPlatDiagModeGet() || (sTransmitMode != DIAG_TRANSMIT_MODE_IDLE &&
-				     sTransmitMode != DIAG_TRANSMIT_MODE_CARRIER)) {
+	if (sTransmitMode != DIAG_TRANSMIT_MODE_IDLE &&
+	    sTransmitMode != DIAG_TRANSMIT_MODE_CARRIER) {
 		return OT_ERROR_INVALID_STATE;
 	}
 
@@ -138,7 +148,7 @@ otError otPlatDiagRadioTransmitCarrier(otInstance *aInstance, bool aEnable)
 
 	return platformRadioTransmitCarrier(aInstance, aEnable);
 }
-#endif /* CONFIG_IEEE802154_CARRIER_FUNCTIONS */
+#endif /* CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS */
 
 /*
  * To enable gpio diag commands, in Devicetree create `openthread` node in `/options/` path
@@ -174,10 +184,6 @@ static otError gpio_get_spec(uint32_t gpio_idx, const struct gpio_dt_spec **spec
 	}
 
 	*spec = &gpio_spec[gpio_idx];
-
-	if (!otPlatDiagModeGet()) {
-		return OT_ERROR_INVALID_STATE;
-	}
 
 	if (!gpio_is_ready_dt(*spec)) {
 		return OT_ERROR_INVALID_ARGS;
@@ -315,7 +321,7 @@ otError otPlatDiagGpioGetMode(uint32_t aGpio, otGpioMode *aMode)
 	* DT_NODE_HAS_PROP(DT_COMPAT_GET_ANY_STATUS_OKAY(openthread_config), diag_gpios)
 	*/
 
-#if defined(CONFIG_IEEE802154_CARRIER_FUNCTIONS)
+#if defined(CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS)
 
 static otError startModCarrier(otInstance *aInstance, uint8_t aArgsLength, char *aArgs[])
 {
@@ -326,8 +332,8 @@ static otError startModCarrier(otInstance *aInstance, uint8_t aArgsLength, char 
 		return OT_ERROR_INVALID_ARGS;
 	}
 
-	if (!otPlatDiagModeGet() || (sTransmitMode != DIAG_TRANSMIT_MODE_IDLE &&
-				     sTransmitMode != DIAG_TRANSMIT_MODE_MODCARRIER)) {
+	if (sTransmitMode != DIAG_TRANSMIT_MODE_IDLE &&
+	    sTransmitMode != DIAG_TRANSMIT_MODE_MODCARRIER) {
 		return OT_ERROR_INVALID_STATE;
 	}
 
@@ -344,11 +350,12 @@ static otError startModCarrier(otInstance *aInstance, uint8_t aArgsLength, char 
 	return platformRadioTransmitModulatedCarrier(aInstance, enable, data);
 }
 
-#endif
+#endif /* CONFIG_OPENTHREAD_PLATFORM_CARRIER_FUNCTIONS */
 
 void otPlatDiagAlarmCallback(otInstance *aInstance)
 {
 	uint32_t now;
+	otError error;
 	otRadioFrame *txPacket;
 	const uint16_t diag_packet_len = 30;
 
@@ -374,7 +381,11 @@ void otPlatDiagAlarmCallback(otInstance *aInstance)
 				txPacket->mPsdu[i] = i;
 			}
 
-			otPlatRadioTransmit(aInstance, txPacket);
+			error = otPlatRadioTransmit(aInstance, txPacket);
+			if (error != OT_ERROR_NONE) {
+				otPlatLog(OT_LOG_LEVEL_WARN, OT_LOG_REGION_PLATFORM,
+					  "%s failed (%d)", "otPlatRadioTransmit", error);
+			}
 
 			if (sTxCount != -1) {
 				sTxCount--;
@@ -396,10 +407,6 @@ static otError processTransmit(otInstance *aInstance, uint8_t aArgsLength, char 
 	long value;
 	uint32_t now;
 
-	if (!otPlatDiagModeGet()) {
-		return OT_ERROR_INVALID_STATE;
-	}
-
 	if (aArgsLength == 0) {
 		diag_output("transmit will send %" PRId32 " diagnostic messages with %" PRIu32
 			    " ms interval\r\n",
@@ -413,8 +420,11 @@ static otError processTransmit(otInstance *aInstance, uint8_t aArgsLength, char 
 		otPlatAlarmMilliStop(aInstance);
 		diag_output("diagnostic message transmission is stopped\r\n");
 		sTransmitMode = DIAG_TRANSMIT_MODE_IDLE;
-		otPlatRadioReceive(aInstance, sChannel);
-
+		error = otPlatRadioReceive(aInstance, sChannel);
+		if (error != OT_ERROR_NONE) {
+			otPlatLog(OT_LOG_LEVEL_WARN, OT_LOG_REGION_PLATFORM,
+				  "%s failed (%d)", "otPlatRadioReceive", error);
+		}
 	} else if (strcmp(aArgs[0], "start") == 0) {
 		if (sTransmitMode != DIAG_TRANSMIT_MODE_IDLE) {
 			return OT_ERROR_INVALID_STATE;

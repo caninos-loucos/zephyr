@@ -21,7 +21,7 @@ static int64_t start_time;
 /* This struct contains (potentially large) TX and RX buffers, so allocate statically */
 static struct coap_client client = {0};
 
-static void net_event_handler(uint32_t mgmt_event, struct net_if *iface, void *info,
+static void net_event_handler(uint64_t mgmt_event, struct net_if *iface, void *info,
 			      size_t info_length, void *user_data)
 {
 	if (NET_EVENT_L4_CONNECTED == mgmt_event) {
@@ -81,6 +81,8 @@ static void do_coap_download(struct sockaddr *sa)
 
 	/* Wait for CoAP request to complete */
 	k_sem_take(&coap_done_sem, K_FOREVER);
+
+	coap_client_cancel_requests(&client);
 
 	zsock_close(sockfd);
 }

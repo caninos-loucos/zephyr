@@ -4,31 +4,42 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <sys/types.h>
+#include <errno.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include <zephyr/sys/atomic.h>
-#include <zephyr/kernel.h>
-#include <zephyr/sys/byteorder.h>
-#include <zephyr/sys/check.h>
-
+#include <zephyr/autoconf.h>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gap.h>
+#include <zephyr/bluetooth/hci_types.h>
 #include <zephyr/bluetooth/iso.h>
 #include <zephyr/bluetooth/buf.h>
 #include <zephyr/bluetooth/direction.h>
 #include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/hci_vs.h>
+#include <zephyr/kernel.h>
+#include <zephyr/net_buf.h>
+#include <zephyr/sys/__assert.h>
+#include <zephyr/sys/atomic.h>
+#include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/check.h>
+#include <zephyr/sys/slist.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/sys/util_macro.h>
+#include <zephyr/toolchain.h>
+
+#include <sys/types.h>
 
 #include "addr_internal.h"
-#include "hci_core.h"
+#include "common/bt_str.h"
 #include "conn_internal.h"
 #include "direction_internal.h"
+#include "hci_core.h"
 #include "id.h"
-
-#include "common/bt_str.h"
 #include "scan.h"
 
 #define LOG_LEVEL CONFIG_BT_HCI_CORE_LOG_LEVEL
@@ -122,7 +133,7 @@ static int cmd_le_set_ext_scan_enable(bool enable, bool filter_duplicates, uint1
 	struct net_buf *buf;
 	int err;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_EXT_SCAN_ENABLE, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -152,7 +163,7 @@ static int cmd_le_set_scan_enable_legacy(bool enable, bool filter_duplicates)
 	struct net_buf *buf;
 	int err;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_SCAN_ENABLE, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -241,10 +252,7 @@ static int start_le_scan_ext(struct bt_le_scan_param *scan_param)
 		return err;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_EXT_SCAN_PARAM,
-				sizeof(*set_param) +
-				(phy_1m ? sizeof(*phy_1m) : 0) +
-				(phy_coded ? sizeof(*phy_coded) : 0));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -311,7 +319,7 @@ static int start_le_scan_legacy(struct bt_le_scan_param *param)
 		return err;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_SCAN_PARAM, sizeof(set_param));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -741,6 +749,28 @@ static uint8_t get_adv_type(uint8_t evt_type)
 	}
 }
 
+/* Convert Extended adv report PHY to GAP PHY */
+static uint8_t get_ext_adv_coding_sel_phy(uint8_t hci_phy)
+{
+	/* Converts from Extended adv report PHY to BT_GAP_LE_PHY_*
+	 * When Advertising Coding Selection (Host Support) is enabled
+	 * the controller will return the advertising coding scheme which
+	 * can be S=2 or S=8 data coding.
+	 */
+	switch (hci_phy) {
+	case BT_HCI_LE_ADV_EVT_PHY_1M:
+		return BT_GAP_LE_PHY_1M;
+	case BT_HCI_LE_ADV_EVT_PHY_2M:
+		return BT_GAP_LE_PHY_2M;
+	case BT_HCI_LE_ADV_EVT_PHY_CODED_S8:
+		return BT_GAP_LE_PHY_CODED_S8;
+	case BT_HCI_LE_ADV_EVT_PHY_CODED_S2:
+		return BT_GAP_LE_PHY_CODED_S2;
+	default:
+		return 0;
+	}
+}
+
 /* Convert extended adv report evt_type field to adv props */
 static uint16_t get_adv_props_extended(uint16_t evt_type)
 {
@@ -755,8 +785,15 @@ static uint16_t get_adv_props_extended(uint16_t evt_type)
 static void create_ext_adv_info(struct bt_hci_evt_le_ext_advertising_info const *const evt,
 				struct bt_le_scan_recv_info *const scan_info)
 {
-	scan_info->primary_phy = bt_get_phy(evt->prim_phy);
-	scan_info->secondary_phy = bt_get_phy(evt->sec_phy);
+	if (IS_ENABLED(CONFIG_BT_EXT_ADV_CODING_SELECTION) &&
+	    BT_FEAT_LE_ADV_CODING_SEL(bt_dev.le.features)) {
+		scan_info->primary_phy = get_ext_adv_coding_sel_phy(evt->prim_phy);
+		scan_info->secondary_phy = get_ext_adv_coding_sel_phy(evt->sec_phy);
+	} else {
+		scan_info->primary_phy = bt_get_phy(evt->prim_phy);
+		scan_info->secondary_phy = bt_get_phy(evt->sec_phy);
+	}
+
 	scan_info->tx_power = evt->tx_power;
 	scan_info->rssi = evt->rssi;
 	scan_info->sid = evt->sid;
@@ -879,7 +916,7 @@ void bt_hci_le_adv_ext_report(struct net_buf *buf)
 		}
 
 		if (evt->length + ext_scan_buf.len > ext_scan_buf.size) {
-			/* The report does not fit in the reassemby buffer
+			/* The report does not fit in the reassembly buffer
 			 * Discard this and future reports from the advertiser.
 			 */
 			reassembling_advertiser.state = FRAG_ADV_DISCARDING;
@@ -1126,8 +1163,7 @@ static int per_adv_sync_terminate(uint16_t handle)
 	struct bt_hci_cp_le_per_adv_terminate_sync *cp;
 	struct net_buf *buf;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_PER_ADV_TERMINATE_SYNC,
-				sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -1319,9 +1355,7 @@ int bt_le_per_adv_sync_subevent(struct bt_le_per_adv_sync *per_adv_sync,
 		return -EINVAL;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_PER_ADV_SYNC_SUBEVENT,
-				sizeof(*cp) + params->num_subevents);
-
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -1359,9 +1393,7 @@ int bt_le_per_adv_set_response_data(struct bt_le_per_adv_sync *per_adv_sync,
 		return -EINVAL;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_PER_ADV_RESPONSE_DATA,
-				sizeof(*cp) + data->len);
-
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -1390,7 +1422,7 @@ void bt_hci_le_per_adv_sync_lost(struct net_buf *buf)
 	per_adv_sync = bt_hci_per_adv_sync_lookup_handle(sys_le16_to_cpu(evt->handle));
 
 	if (!per_adv_sync) {
-		LOG_ERR("Unknown handle 0x%04Xfor periodic adv sync lost",
+		LOG_ERR("Unknown handle 0x%04X for periodic adv sync lost",
 			sys_le16_to_cpu(evt->handle));
 		return;
 	}
@@ -1887,7 +1919,7 @@ int bt_le_per_adv_sync_create(const struct bt_le_per_adv_sync_param *param,
 		return -ENOMEM;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_PER_ADV_CREATE_SYNC, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		per_adv_sync_delete(per_adv_sync);
 		return -ENOBUFS;
@@ -1994,7 +2026,7 @@ static int bt_le_per_adv_sync_create_cancel(
 		return err;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_PER_ADV_CREATE_SYNC_CANCEL, 0);
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -2090,8 +2122,7 @@ static int bt_le_set_per_adv_recv_enable(
 		return -EALREADY;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_PER_ADV_RECV_ENABLE,
-				sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -2149,8 +2180,7 @@ int bt_le_per_adv_sync_transfer(const struct bt_le_per_adv_sync *per_adv_sync,
 		return -ENOTSUP;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_PER_ADV_SYNC_TRANSFER,
-				sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -2190,7 +2220,7 @@ static int past_param_set(const struct bt_conn *conn, uint8_t mode,
 	struct bt_hci_cp_le_past_param *cp;
 	struct net_buf *buf;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_PAST_PARAM, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -2213,7 +2243,7 @@ static int default_past_param_set(uint8_t mode, uint16_t skip, uint16_t timeout,
 	struct bt_hci_cp_le_default_past_param *cp;
 	struct net_buf *buf;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_DEFAULT_PAST_PARAM, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -2341,8 +2371,7 @@ int bt_le_per_adv_list_add(const bt_addr_le_t *addr, uint8_t sid)
 		return -EAGAIN;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_ADD_DEV_TO_PER_ADV_LIST,
-				sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}
@@ -2372,8 +2401,7 @@ int bt_le_per_adv_list_remove(const bt_addr_le_t *addr, uint8_t sid)
 		return -EAGAIN;
 	}
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_LE_REM_DEV_FROM_PER_ADV_LIST,
-				sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (!buf) {
 		return -ENOBUFS;
 	}

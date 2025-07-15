@@ -743,7 +743,8 @@ static int dai_ssp_poll_for_register_delay(uint32_t reg, uint32_t mask,
 					   uint32_t val, uint64_t us)
 {
 	if (!WAIT_FOR((sys_read32(reg) & mask) == val, us, k_busy_wait(1))) {
-		LOG_ERR("poll timeout reg %u mask %u val %u us %u", reg, mask, val, (uint32_t)us);
+		LOG_ERR("poll timeout reg[%#x]=%#x, waited for: mask %#x, val %#x, us %u", reg,
+			sys_read32(reg), mask, val, (uint32_t)us);
 		return -EIO;
 	}
 
@@ -1936,9 +1937,7 @@ static int dai_ssp_parse_tlv(struct dai_intel_ssp *dp, const uint8_t *aux_ptr, s
 	struct ssp_intel_ext_ctl *ext;
 #if SSP_IP_VER >= SSP_IP_VER_1_5
 	struct ssp_intel_link_ctl *link;
-#if SSP_IP_VER > SSP_IP_VER_1_5
 	struct dai_intel_ssp_plat_data *ssp = dai_get_plat_data(dp);
-#endif
 #endif
 
 	for (i = 0; i < aux_len; i += hop) {
@@ -1986,13 +1985,13 @@ static int dai_ssp_parse_tlv(struct dai_intel_ssp *dp, const uint8_t *aux_ptr, s
 		case SSP_LINK_CLK_SOURCE:
 #if SSP_IP_VER >= SSP_IP_VER_1_5
 			link = (struct ssp_intel_link_ctl *)&aux_tlv->val;
+			ssp->link_clock = link->clock_source;
 #if SSP_IP_VER < SSP_IP_VER_2_0
 			sys_write32((sys_read32(dai_ip_base(dp) + I2SLCTL_OFFSET) &
 				    ~I2CLCTL_MLCS(0x7)) |
 				    I2CLCTL_MLCS(link->clock_source), dai_ip_base(dp) +
 				    I2SLCTL_OFFSET);
 #elif SSP_IP_VER > SSP_IP_VER_1_5
-			ssp->link_clock = link->clock_source;
 			sys_write32((sys_read32(dai_i2svss_base(dp) + I2SLCTL_OFFSET) &
 				    ~I2CLCTL_MLCS(0x7)) |
 				    I2CLCTL_MLCS(link->clock_source),
@@ -2327,29 +2326,29 @@ static void dai_ssp_start(struct dai_intel_ssp *dp, int direction)
 
 
 	/* enable DMA */
-#if SSP_IP_VER > SSP_IP_VER_2_0
 	if (direction == DAI_DIR_PLAYBACK) {
+		LOG_INF("SSP%d TX", dp->dai_index);
+#if SSP_IP_VER > SSP_IP_VER_2_0
 		dai_ssp_update_bits(dp, SSMODyCS(dp->tdm_slot_group),
 				    SSMODyCS_TSRE, SSMODyCS_TSRE);
 		dai_ssp_update_bits(dp, SSMODyCS(dp->tdm_slot_group),
 				    SSMODyCS_TXEN, SSMODyCS_TXEN);
+#else
+		dai_ssp_update_bits(dp, SSCR1, SSCR1_TSRE, SSCR1_TSRE);
+		dai_ssp_update_bits(dp, SSTSA, SSTSA_TXEN, SSTSA_TXEN);
+#endif
 	} else {
+		LOG_INF("SSP%d RX", dp->dai_index);
+#if SSP_IP_VER > SSP_IP_VER_2_0
 		dai_ssp_update_bits(dp, SSMIDyCS(dp->tdm_slot_group),
 				    SSMIDyCS_RSRE, SSMIDyCS_RSRE);
 		dai_ssp_update_bits(dp, SSMIDyCS(dp->tdm_slot_group),
 				    SSMIDyCS_RXEN, SSMIDyCS_RXEN);
-	}
 #else
-	if (direction == DAI_DIR_PLAYBACK) {
-		LOG_INF("SSP%d TX", dp->dai_index);
-		dai_ssp_update_bits(dp, SSCR1, SSCR1_TSRE, SSCR1_TSRE);
-		dai_ssp_update_bits(dp, SSTSA, SSTSA_TXEN, SSTSA_TXEN);
-	} else {
-		LOG_INF("SSP%d RX", dp->dai_index);
 		dai_ssp_update_bits(dp, SSCR1, SSCR1_RSRE, SSCR1_RSRE);
 		dai_ssp_update_bits(dp, SSRSA, SSRSA_RXEN, SSRSA_RXEN);
-	}
 #endif
+	}
 
 	dp->state[direction] = DAI_STATE_RUNNING;
 
@@ -2562,6 +2561,11 @@ static void ssp_acquire_ip(struct dai_intel_ssp *dp)
 			    ~I2CLCTL_MLCS(0x7)) |
 			    I2CLCTL_MLCS(ssp->link_clock),
 			    dai_i2svss_base(dp) + I2SLCTL_OFFSET);
+#elif SSP_IP_VER == SSP_IP_VER_1_5
+		sys_write32((sys_read32(dai_ip_base(dp) + I2SLCTL_OFFSET) &
+			    ~I2CLCTL_MLCS(0x7)) |
+			    I2CLCTL_MLCS(ssp->link_clock), dai_ip_base(dp) +
+			    I2SLCTL_OFFSET);
 #endif
 	}
 }
@@ -2594,6 +2598,11 @@ static void ssp_release_ip(struct dai_intel_ssp *dp)
 			    ~I2CLCTL_MLCS(0x7)) |
 			    I2CLCTL_MLCS(DAI_INTEL_SSP_CLOCK_XTAL_OSCILLATOR),
 			    dai_i2svss_base(dp) + I2SLCTL_OFFSET);
+#elif SSP_IP_VER == SSP_IP_VER_1_5
+		sys_write32((sys_read32(dai_ip_base(dp) + I2SLCTL_OFFSET) &
+			   ~I2CLCTL_MLCS(0x7)) |
+			   I2CLCTL_MLCS(DAI_INTEL_SSP_CLOCK_XTAL_OSCILLATOR),
+			   dai_ip_base(dp) + I2SLCTL_OFFSET);
 #endif
 
 		dai_ssp_pm_runtime_en_ssp_clk_gating(dp, ssp->ssp_index);

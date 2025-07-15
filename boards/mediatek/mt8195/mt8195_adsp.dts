@@ -34,9 +34,9 @@
 		cpuclk: cpuclk@10000000 {
 			compatible = "mediatek,mt8195_cpuclk";
 			reg = <0x10000000 380>;
-			cg_reg = <0x10720180>;
-			pll_ctrl_reg = <0x1000c7e0>;
-			freqs_mhz = <26 370 540 720>;
+			cg-reg = <0x10720180>;
+			pll-ctrl-reg = <0x1000c7e0>;
+			freqs-mhz = <26 370 540 720>;
 		};
 
 		core_intc: core_intc@0 {
@@ -46,12 +46,12 @@
 			#interrupt-cells = <3>;
 		};
 
-		intc1: intc@10680130 {
+		intc1: intc@10803130 {
 			compatible = "mediatek,adsp_intc";
 			interrupt-controller;
 			#interrupt-cells = <3>;
-			reg = <0x10680130 4>;
-			status-reg = <0x10680150>;
+			reg = <0x10803130 4>;
+			status-reg = <0x10803150>;
 			interrupts = <1 0 0>;
 			mask = <0x3ffffff0>;
 			interrupt-parent = <&core_intc>;

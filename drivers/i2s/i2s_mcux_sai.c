@@ -1,5 +1,5 @@
 /*
- * Copyright 2021,2023-2024 NXP Semiconductor INC.
+ * Copyright 2021,2023-2025 NXP Semiconductor INC.
  * All rights reserved.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -94,9 +94,10 @@ struct i2s_mcux_config {
 	uint32_t pll_pd;
 	uint32_t pll_num;
 	uint32_t pll_den;
-	uint32_t *mclk_control_base;
+	uint32_t mclk_control_base;
 	uint32_t mclk_pin_mask;
 	uint32_t mclk_pin_offset;
+	bool mclk_output;
 	uint32_t tx_channel;
 	clock_control_subsys_t clk_sub_sys;
 	const struct device *ccm_dev;
@@ -308,11 +309,23 @@ static void i2s_dma_tx_callback(const struct device *dma_dev, void *arg, uint32_
 		/* TX queue has drained */
 		strm->state = I2S_STATE_READY;
 		LOG_DBG("TX stream has stopped");
-	} else {
-		strm->state = I2S_STATE_ERROR;
-		LOG_ERR("TX Failed to reload DMA");
+		goto disabled_exit_no_drop;
 	}
-	goto disabled_exit_no_drop;
+
+	LOG_WRN("TX input queue empty!");
+	if (strm->free_tx_dma_blocks >= MAX_TX_DMA_BLOCKS) {
+		/* In running state, no TX blocks for transferring, so stop
+		 * TX (This will disable bit clock to avoid dummy bits
+		 * received in RX side.
+		 */
+		const struct i2s_mcux_config *dev_cfg = dev->config;
+		I2S_Type *base = (I2S_Type *)dev_cfg->base;
+
+		SAI_TxEnable(base, false);
+		LOG_WRN("TX is paused.");
+	}
+	goto enabled_exit;
+
 
 disabled_exit_no_drop:
 	i2s_tx_stream_disable(dev, false);
@@ -400,9 +413,10 @@ error:
 static void enable_mclk_direction(const struct device *dev, bool dir)
 {
 	const struct i2s_mcux_config *dev_cfg = dev->config;
+	uint32_t control_base = dev_cfg->mclk_control_base;
 	uint32_t offset = dev_cfg->mclk_pin_offset;
 	uint32_t mask = dev_cfg->mclk_pin_mask;
-	uint32_t *base = (uint32_t *)(dev_cfg->mclk_control_base + offset);
+	uint32_t *base = (uint32_t *)(control_base + offset);
 
 	if (dir) {
 		*base |= mask;
@@ -443,6 +457,10 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 	int ret = -EINVAL;
 	uint32_t mclk;
 
+	if (dir == I2S_DIR_BOTH) {
+		return -ENOSYS;
+	}
+
 	if ((dev_data->tx.state != I2S_STATE_NOT_READY) &&
 	    (dev_data->tx.state != I2S_STATE_READY) &&
 	    (dev_data->rx.state != I2S_STATE_NOT_READY) &&
@@ -474,9 +492,7 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 
 	memset(&config, 0, sizeof(config));
 
-	const bool is_mclk_slave = i2s_cfg->options & I2S_OPT_BIT_CLK_SLAVE;
-
-	enable_mclk_direction(dev, !is_mclk_slave);
+	enable_mclk_direction(dev, dev_cfg->mclk_output);
 
 	get_mclk_rate(dev, &mclk);
 	LOG_DBG("mclk is %d", mclk);
@@ -596,6 +612,7 @@ static int i2s_mcux_config(const struct device *dev, enum i2s_dir dir,
 		LOG_DBG("tx slab block_size = %d", (uint32_t)i2s_cfg->mem_slab->info.block_size);
 		LOG_DBG("tx slab buffer = 0x%x", (uint32_t)i2s_cfg->mem_slab->buffer);
 
+		config.fifo.fifoWatermark = (uint32_t)FSL_FEATURE_SAI_FIFO_COUNTn(base) - 1;
 		/* set bit clock divider */
 		SAI_TxSetConfig(base, &config);
 		dev_data->tx.start_channel = config.startChannel;
@@ -975,6 +992,23 @@ static int i2s_mcux_write(const struct device *dev, void *mem_block, size_t size
 		return ret;
 	}
 
+	if (strm->state == I2S_STATE_RUNNING && strm->free_tx_dma_blocks >= MAX_TX_DMA_BLOCKS) {
+		uint8_t blocks_queued = 0;
+		const struct i2s_mcux_config *dev_cfg = dev->config;
+		I2S_Type *base = (I2S_Type *)dev_cfg->base;
+		/* As DMA has been stopped because reloading failure in TX callback,
+		 * here is a good place to reload it and resume TX.
+		 */
+		ret = i2s_tx_reload_multiple_dma_blocks(dev, &blocks_queued);
+		if (ret == 0 && blocks_queued > 0) {
+			SAI_TxEnable(base, true);
+			LOG_WRN("TX is resumed");
+		} else {
+			LOG_ERR("TX block reload err, TX is not resumed");
+			return ret;
+		}
+	}
+
 	return ret;
 }
 
@@ -1030,6 +1064,7 @@ static void i2s_mcux_isr(void *arg)
 
 static void audio_clock_settings(const struct device *dev)
 {
+#ifdef CONFIG_I2S_HAS_PLL_SETTING
 	clock_audio_pll_config_t audioPllConfig;
 	const struct i2s_mcux_config *dev_cfg = dev->config;
 	uint32_t clock_name = (uint32_t)dev_cfg->clk_sub_sys;
@@ -1055,6 +1090,7 @@ static void audio_clock_settings(const struct device *dev)
 #endif /* CONFIG_SOC_SERIES */
 
 	CLOCK_InitAudioPll(&audioPllConfig);
+#endif
 }
 
 static int i2s_mcux_initialize(const struct device *dev)
@@ -1092,6 +1128,8 @@ static int i2s_mcux_initialize(const struct device *dev)
 	/*clock configuration*/
 	audio_clock_settings(dev);
 
+	enable_mclk_direction(dev, dev_cfg->mclk_output);
+
 	SAI_Init(base);
 
 	dev_data->tx.state = I2S_STATE_NOT_READY;
@@ -1113,7 +1151,8 @@ static int i2s_mcux_initialize(const struct device *dev)
 /* master clock configurations */
 #if (defined(FSL_FEATURE_SAI_HAS_MCR) && (FSL_FEATURE_SAI_HAS_MCR)) ||                             \
 	(defined(FSL_FEATURE_SAI_HAS_MCLKDIV_REGISTER) && (FSL_FEATURE_SAI_HAS_MCLKDIV_REGISTER))
-#if defined(FSL_FEATURE_SAI_HAS_MCLKDIV_REGISTER) && (FSL_FEATURE_SAI_HAS_MCLKDIV_REGISTER)
+#if ((defined(FSL_FEATURE_SAI_HAS_MCLKDIV_REGISTER) && (FSL_FEATURE_SAI_HAS_MCLKDIV_REGISTER)) || \
+	(defined(FSL_FEATURE_SAI_HAS_MCR_MCLK_POST_DIV) && (FSL_FEATURE_SAI_HAS_MCR_MCLK_POST_DIV)))
 	mclkConfig.mclkHz = mclk;
 	mclkConfig.mclkSourceClkHz = mclk;
 #endif
@@ -1140,18 +1179,18 @@ static DEVICE_API(i2s, i2s_mcux_driver_api) = {
                                                                                                    \
 	static const struct i2s_mcux_config i2s_##i2s_id##_config = {                              \
 		.base = (I2S_Type *)DT_INST_REG_ADDR(i2s_id),                                      \
-		.clk_src = DT_INST_PROP(i2s_id, clock_mux),                                        \
-		.clk_pre_div = DT_INST_PROP(i2s_id, pre_div),                                      \
-		.clk_src_div = DT_INST_PROP(i2s_id, podf),                                         \
-		.pll_src = DT_PHA_BY_NAME(DT_DRV_INST(i2s_id), pll_clocks, src, value),            \
-		.pll_lp = DT_PHA_BY_NAME(DT_DRV_INST(i2s_id), pll_clocks, lp, value),              \
-		.pll_pd = DT_PHA_BY_NAME(DT_DRV_INST(i2s_id), pll_clocks, pd, value),              \
-		.pll_num = DT_PHA_BY_NAME(DT_DRV_INST(i2s_id), pll_clocks, num, value),            \
-		.pll_den = DT_PHA_BY_NAME(DT_DRV_INST(i2s_id), pll_clocks, den, value),            \
-		.mclk_control_base =                                                               \
-			(uint32_t *)DT_REG_ADDR(DT_PHANDLE(DT_DRV_INST(i2s_id), pinmuxes)),    \
-		.mclk_pin_mask = DT_PHA_BY_IDX(DT_DRV_INST(i2s_id), pinmuxes, 0, function),        \
-		.mclk_pin_offset = DT_PHA_BY_IDX(DT_DRV_INST(i2s_id), pinmuxes, 0, pin),           \
+		.clk_src = DT_INST_PROP_OR(i2s_id, clock_mux, 0),                                  \
+		.clk_pre_div = DT_INST_PROP_OR(i2s_id, pre_div, 0),                                \
+		.clk_src_div = DT_INST_PROP_OR(i2s_id, podf, 0),                                   \
+		.pll_src = DT_PHA_BY_NAME_OR(DT_DRV_INST(i2s_id), pll_clocks, src, value, 0),      \
+		.pll_lp = DT_PHA_BY_NAME_OR(DT_DRV_INST(i2s_id), pll_clocks, lp, value, 0),        \
+		.pll_pd = DT_PHA_BY_NAME_OR(DT_DRV_INST(i2s_id), pll_clocks, pd, value, 0),        \
+		.pll_num = DT_PHA_BY_NAME_OR(DT_DRV_INST(i2s_id), pll_clocks, num, value, 0),      \
+		.pll_den = DT_PHA_BY_NAME_OR(DT_DRV_INST(i2s_id), pll_clocks, den, value, 0),      \
+		.mclk_control_base = DT_REG_ADDR(DT_PHANDLE(DT_DRV_INST(i2s_id), pinmuxes)),       \
+		.mclk_pin_mask = DT_PHA_BY_IDX(DT_DRV_INST(i2s_id), pinmuxes, 0, mask),            \
+		.mclk_pin_offset = DT_PHA_BY_IDX(DT_DRV_INST(i2s_id), pinmuxes, 0, offset),        \
+		.mclk_output = DT_INST_PROP_OR(i2s_id, mclk_output, 0),                            \
 		.clk_sub_sys =                                                                     \
 			(clock_control_subsys_t)DT_INST_CLOCKS_CELL_BY_IDX(i2s_id, 0, name),       \
 		.ccm_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(i2s_id)),                             \

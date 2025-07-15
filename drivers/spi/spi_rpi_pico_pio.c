@@ -69,6 +69,22 @@ RPI_PICO_PIO_DEFINE_PROGRAM(spi_mode_0_0, SPI_MODE_0_0_WRAP_TARGET, SPI_MODE_0_0
 );
 
 /* ------------ */
+/* spi_mode_0_1 */
+/* ------------ */
+
+#define SPI_MODE_0_1_WRAP_TARGET 0
+#define SPI_MODE_0_1_WRAP        2
+#define SPI_MODE_0_1_CYCLES      4
+
+RPI_PICO_PIO_DEFINE_PROGRAM(spi_mode_0_1, SPI_MODE_0_1_WRAP_TARGET, SPI_MODE_0_1_WRAP,
+			    /*     .wrap_target */
+			    0x6021,   /* 0: out    x, 1            side 0 */
+			    0xb101,   /* 1: mov    pins, x         side 1 [1] */
+			    0x4001,   /* 2: in     pins, 1         side 0 */
+				      /*     .wrap */
+);
+
+/* ------------ */
 /* spi_mode_1_1 */
 /* ------------ */
 
@@ -365,8 +381,13 @@ static int spi_pico_pio_configure(const struct spi_pico_pio_config *dev_cfg,
 			wrap_target = RPI_PICO_PIO_GET_WRAP_TARGET(spi_mode_1_1);
 			wrap = RPI_PICO_PIO_GET_WRAP(spi_mode_1_1);
 			cycles = SPI_MODE_1_1_CYCLES;
+		} else if ((cpol == 0) && (cpha == 1)) {
+			program = RPI_PICO_PIO_GET_PROGRAM(spi_mode_0_1);
+			wrap_target = RPI_PICO_PIO_GET_WRAP_TARGET(spi_mode_0_1);
+			wrap = RPI_PICO_PIO_GET_WRAP(spi_mode_0_1);
+			cycles = SPI_MODE_0_1_CYCLES;
 		} else {
-			LOG_ERR("Not supported:  cpol=%d, cpha=%d\n", cpol, cpha);
+			LOG_ERR("Not supported:  cpol=%d, cpha=%d", cpol, cpha);
 			return -ENOTSUP;
 		}
 
@@ -650,8 +671,8 @@ static int spi_pico_pio_transceive_impl(const struct device *dev, const struct s
 
 	do {
 		spi_pico_pio_txrx(dev);
-		spi_context_update_tx(spi_ctx, 1, data->tx_count);
-		spi_context_update_rx(spi_ctx, 1, data->rx_count);
+		spi_context_update_tx(spi_ctx, data->dfs, data->tx_count);
+		spi_context_update_rx(spi_ctx, data->dfs, data->rx_count);
 	} while (spi_pico_pio_transfer_ongoing(data));
 
 	spi_context_cs_control(spi_ctx, false);

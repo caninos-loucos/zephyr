@@ -25,7 +25,7 @@ int fxls8974_transceive(const struct device *dev,
 {
 		const struct fxls8974_config *cfg = dev->config;
 		const struct spi_buf buf = { .buf = data, .len = length };
-		const struct spi_buf_set s = { .bufs = &buf, .count = 1 };
+		const struct spi_buf_set s = { .buffers = &buf, .count = 1 };
 
 		return spi_transceive_dt(&cfg->bus_cfg.spi, &s, &s);
 }
@@ -43,8 +43,8 @@ int fxls8974_read_spi(const struct device *dev,
 				{ .buf = reg_buf, .len = 3 },
 				{ .buf = data, .len = length }
 		};
-		const struct spi_buf_set tx = { .bufs = buf, .count = 1 };
-		const struct spi_buf_set rx = { .bufs = buf, .count = 2 };
+		const struct spi_buf_set tx = { .buffers = buf, .count = 1 };
+		const struct spi_buf_set rx = { .buffers = buf, .count = 2 };
 
 		return spi_transceive_dt(&cfg->bus_cfg.spi, &tx, &rx);
 }
@@ -379,9 +379,7 @@ static int fxls8974_channel_get(const struct device *dev,
 
 			val += FXLS8974_MAX_ACCEL_CHANNELS;
 
-			if (fxls8974_get_temp_data(dev, val)) {
-				return -EIO;
-			}
+			return fxls8974_get_temp_data(dev, val);
 			break;
 		case SENSOR_CHAN_ACCEL_XYZ:
 			return fxls8974_get_accel_data(dev, val, SENSOR_CHAN_ACCEL_XYZ);
@@ -401,7 +399,7 @@ static int fxls8974_channel_get(const struct device *dev,
 		return 0;
 }
 
-int fxls8974_get_active(const struct device *dev, enum fxls8974_active *active)
+int fxls8974_get_active(const struct device *dev, uint8_t *active)
 {
 		const struct fxls8974_config *cfg = dev->config;
 		uint8_t val;
@@ -417,7 +415,7 @@ int fxls8974_get_active(const struct device *dev, enum fxls8974_active *active)
 		return 0;
 }
 
-int fxls8974_set_active(const struct device *dev, enum fxls8974_active active)
+int fxls8974_set_active(const struct device *dev, uint8_t active)
 {
 		const struct fxls8974_config *cfg = dev->config;
 
@@ -493,14 +491,13 @@ static int fxls8974_init(const struct device *dev)
 			return -EIO;
 		}
 
-		if (data->whoami == WHOAMI_ID_FXLS8974) {
-			LOG_DBG("Device ID 0x%x, FXLS8974", data->whoami);
-		} else {
+		if (data->whoami != WHOAMI_ID_FXLS8964 &&
+		data->whoami != WHOAMI_ID_FXLS8974) {
 			LOG_ERR("Unknown Device ID 0x%x", data->whoami);
-			return -EIO;
+			return -ENXIO;
 		}
 
-		if (fxls8974_get_active(dev, (enum fxls8974_active *)&regVal)) {
+		if (fxls8974_get_active(dev, &regVal)) {
 			LOG_ERR("Failed to set standby mode");
 			return -EIO;
 		}
@@ -562,7 +559,7 @@ static int fxls8974_init(const struct device *dev)
 			return -EIO;
 		}
 
-		if (fxls8974_get_active(dev, (enum fxls8974_active *)&regVal)) {
+		if (fxls8974_get_active(dev, &regVal)) {
 			LOG_ERR("Failed to get active mode");
 			return -EIO;
 		}

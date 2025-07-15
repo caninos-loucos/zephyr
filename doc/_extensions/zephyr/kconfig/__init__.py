@@ -26,6 +26,10 @@ Options
 - kconfig_ext_paths: A list of base paths where to search for external modules
   Kconfig files when they use ``kconfig-ext: True``. The extension will look for
   ${BASE_PATH}/modules/${MODULE_NAME}/Kconfig.
+- kconfig_gh_link_base_url: The base URL for the GitHub links. This is used to
+  generate links to the Kconfig files on GitHub.
+- kconfig_zephyr_version: The Zephyr version. This is used to generate links to
+  the Kconfig files on GitHub.
 """
 
 import argparse
@@ -152,11 +156,18 @@ def kconfig_load(app: Sphinx) -> tuple[kconfiglib.Kconfig, dict[str, str]]:
             if not build_conf:
                 continue
 
+            # Module Kconfig file has already been specified
+            if f"ZEPHYR_{name_var}_KCONFIG" in os.environ:
+                continue
+
             if build_conf.get("kconfig"):
                 kconfig = Path(module.project) / build_conf["kconfig"]
                 os.environ[f"ZEPHYR_{name_var}_KCONFIG"] = str(kconfig)
             elif build_conf.get("kconfig-ext"):
                 for path in app.config.kconfig_ext_paths:
+                    # Assume that the kconfig file exists at this path.
+                    # Technically the cmake variable can be constructed arbitarily
+                    # by "{ext_path}/modules/modules.cmake"
                     kconfig = Path(path) / "modules" / name / "Kconfig"
                     if kconfig.exists():
                         os.environ[f"ZEPHYR_{name_var}_KCONFIG"] = str(kconfig)
@@ -222,13 +233,26 @@ class _FindKconfigSearchDirectiveVisitor(nodes.NodeVisitor):
         return self._found
 
 
+class KconfigRegexRole(XRefRole):
+    """Role for creating links to Kconfig regex searches."""
+
+    def process_link(self, env: BuildEnvironment, refnode: nodes.Element, has_explicit_title: bool,
+                     title: str, target: str) -> tuple[str, str]:
+        # render as "normal" text when explicit title is provided, literal otherwise
+        if has_explicit_title:
+            self.innernodeclass = nodes.inline
+        else:
+            self.innernodeclass = nodes.literal
+        return title, target
+
+
 class KconfigDomain(Domain):
     """Kconfig domain"""
 
     name = "kconfig"
     label = "Kconfig"
     object_types = {"option": ObjType("option", "option")}
-    roles = {"option": XRefRole()}
+    roles = {"option": XRefRole(), "option-regex": KconfigRegexRole()}
     directives = {"search": KconfigSearch}
     initial_data: dict[str, Any] = {"options": set()}
 
@@ -248,20 +272,56 @@ class KconfigDomain(Domain):
         node: pending_xref,
         contnode: nodes.Element,
     ) -> nodes.Element | None:
-        match = [
-            (docname, anchor)
-            for name, _, _, docname, anchor, _ in self.get_objects()
-            if name == target
-        ]
-
-        if match:
-            todocname, anchor = match[0]
-
-            return make_refnode(
-                builder, fromdocname, todocname, anchor, contnode, anchor
-            )
+        if typ == "option-regex":
+            # Handle regex search links
+            search_docname = self._find_search_docname(env)
+            if search_docname:
+                # Create a reference to the search page with the regex as a fragment
+                ref_uri = builder.get_relative_uri(fromdocname, search_docname) + f"#!{target}"
+                ref_node = nodes.reference('', '', refuri=ref_uri, internal=True)
+                ref_node.append(contnode)
+                return ref_node
+            else:
+                # Fallback to plain text if no search page is found
+                return contnode
         else:
-            return None
+            # Handle regular option links
+            match = [
+                (docname, anchor)
+                for name, _, _, docname, anchor, _ in self.get_objects()
+                if name == target
+            ]
+
+            if match:
+                todocname, anchor = match[0]
+
+                return make_refnode(
+                    builder, fromdocname, todocname, anchor, contnode, anchor
+                )
+            else:
+                return None
+
+    def _find_search_docname(self, env: BuildEnvironment) -> str | None:
+        """Find the document containing the kconfig search directive."""
+        # Cache the result to avoid repeated searches
+        if hasattr(env, '_kconfig_search_docname'):
+            return env._kconfig_search_docname
+
+        for docname in env.all_docs:
+            try:
+                doctree = env.get_doctree(docname)
+                visitor = _FindKconfigSearchDirectiveVisitor(doctree)
+                doctree.walk(visitor)
+                if visitor.found_kconfig_search_directive:
+                    env._kconfig_search_docname = docname
+                    return docname
+            except Exception:
+                # Skip documents that can't be loaded
+                continue
+
+        # No search directive found
+        env._kconfig_search_docname = None
+        return None
 
     def add_option(self, option):
         """Register a new Kconfig option to the domain."""
@@ -429,8 +489,14 @@ def kconfig_build_resources(app: Sphinx) -> None:
 
         kconfig_db_file = outdir / "kconfig.json"
 
+        kconfig_db = {
+            "gh_base_url": app.config.kconfig_gh_link_base_url,
+            "zephyr_version": app.config.kconfig_zephyr_version,
+            "symbols": db,
+        }
+
         with open(kconfig_db_file, "w") as f:
-            json.dump(db, f)
+            json.dump(kconfig_db, f)
 
     app.config.html_extra_path.append(kconfig_db_file.as_posix())
     app.config.html_static_path.append(RESOURCES_DIR.as_posix())
@@ -461,6 +527,8 @@ def kconfig_install(
 def setup(app: Sphinx):
     app.add_config_value("kconfig_generate_db", False, "env")
     app.add_config_value("kconfig_ext_paths", [], "env")
+    app.add_config_value("kconfig_gh_link_base_url", "", "")
+    app.add_config_value("kconfig_zephyr_version", "", "")
 
     app.add_node(
         KconfigSearchNode,

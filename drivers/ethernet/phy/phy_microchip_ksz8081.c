@@ -23,6 +23,8 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
+#include "phy_mii.h"
+
 #define PHY_MC_KSZ8081_OMSO_REG			0x16
 #define PHY_MC_KSZ8081_OMSO_FACTORY_MODE_MASK	BIT(15)
 #define PHY_MC_KSZ8081_OMSO_NAND_TREE_MASK	BIT(5)
@@ -161,13 +163,11 @@ static int phy_mc_ksz8081_get_link(const struct device *dev,
 	ret = phy_mc_ksz8081_read(dev, MII_BMSR, &bmsr);
 	if (ret) {
 		LOG_ERR("Error reading phy (%d) basic status register", config->addr);
-		k_mutex_unlock(&data->mutex);
-		return ret;
+		goto done;
 	}
 	state->is_up = bmsr & MII_BMSR_LINK_STATUS;
 
 	if (!state->is_up) {
-		k_mutex_unlock(&data->mutex);
 		goto result;
 	}
 
@@ -175,31 +175,26 @@ static int phy_mc_ksz8081_get_link(const struct device *dev,
 	ret = phy_mc_ksz8081_read(dev, MII_ANAR, &anar);
 	if (ret) {
 		LOG_ERR("Error reading phy (%d) advertising register", config->addr);
-		k_mutex_unlock(&data->mutex);
-		return ret;
+		goto done;
 	}
 
 	/* Read link partner capability */
 	ret = phy_mc_ksz8081_read(dev, MII_ANLPAR, &anlpar);
 	if (ret) {
 		LOG_ERR("Error reading phy (%d) link partner register", config->addr);
-		k_mutex_unlock(&data->mutex);
-		return ret;
+		goto done;
 	}
-
-	/* Unlock mutex */
-	k_mutex_unlock(&data->mutex);
 
 	uint32_t mutual_capabilities = anar & anlpar;
 
 	if (mutual_capabilities & MII_ADVERTISE_100_FULL) {
-		state->speed = LINK_FULL_100BASE_T;
+		state->speed = LINK_FULL_100BASE;
 	} else if (mutual_capabilities & MII_ADVERTISE_100_HALF) {
-		state->speed = LINK_HALF_100BASE_T;
+		state->speed = LINK_HALF_100BASE;
 	} else if (mutual_capabilities & MII_ADVERTISE_10_FULL) {
-		state->speed = LINK_FULL_10BASE_T;
+		state->speed = LINK_FULL_10BASE;
 	} else if (mutual_capabilities & MII_ADVERTISE_10_HALF) {
-		state->speed = LINK_HALF_10BASE_T;
+		state->speed = LINK_HALF_10BASE;
 	} else {
 		ret = -EIO;
 	}
@@ -213,6 +208,9 @@ result:
 				PHY_LINK_IS_FULL_DUPLEX(state->speed) ? "full" : "half");
 		}
 	}
+
+done:
+	k_mutex_unlock(&data->mutex);
 
 	return ret;
 }
@@ -267,30 +265,19 @@ static int phy_mc_ksz8081_static_cfg(const struct device *dev)
 	return 0;
 }
 
-static int phy_mc_ksz8081_reset(const struct device *dev)
-{
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(reset_gpios)
-	const struct mc_ksz8081_config *config = dev->config;
-#endif /* DT_ANY_INST_HAS_PROP_STATUS_OKAY(reset_gpios) */
-	struct mc_ksz8081_data *data = dev->data;
+static int phy_ksz8081_reset_gpio(const struct mc_ksz8081_config *config)
+{
 	int ret;
 
-	/* Lock mutex */
-	ret = k_mutex_lock(&data->mutex, K_FOREVER);
-	if (ret) {
-		LOG_ERR("PHY mutex lock error");
-		return ret;
-	}
-
-#if DT_ANY_INST_HAS_PROP_STATUS_OKAY(reset_gpios)
 	if (!config->reset_gpio.port) {
-		goto skip_reset_gpio;
+		return -ENODEV;
 	}
 
 	/* Start reset */
 	ret = gpio_pin_set_dt(&config->reset_gpio, 0);
 	if (ret) {
-		goto done;
+		return ret;
 	}
 
 	/* Wait for at least 500 us as specified by datasheet */
@@ -302,9 +289,35 @@ static int phy_mc_ksz8081_reset(const struct device *dev)
 	/* After deasserting reset, must wait at least 100 us to use programming interface */
 	k_busy_wait(200);
 
-	goto done;
-skip_reset_gpio:
+	return ret;
+}
+#else
+static int phy_ksz8081_reset_gpio(const struct mc_ksz8081_config *config)
+{
+	ARG_UNUSED(config);
+
+	return -ENODEV;
+}
 #endif /* DT_ANY_INST_HAS_PROP_STATUS_OKAY(reset_gpios) */
+
+static int phy_mc_ksz8081_reset(const struct device *dev)
+{
+	const struct mc_ksz8081_config *config = dev->config;
+	struct mc_ksz8081_data *data = dev->data;
+	int ret;
+
+	/* Lock mutex */
+	ret = k_mutex_lock(&data->mutex, K_FOREVER);
+	if (ret) {
+		LOG_ERR("PHY mutex lock error");
+		return ret;
+	}
+
+	ret = phy_ksz8081_reset_gpio(config);
+	if (ret != -ENODEV) { /* On -ENODEV, attempt command-based reset */
+		goto done;
+	}
+
 	ret = phy_mc_ksz8081_write(dev, MII_BMCR, MII_BMCR_RESET);
 	if (ret) {
 		goto done;
@@ -321,14 +334,18 @@ done:
 	return ret;
 }
 
-static int phy_mc_ksz8081_cfg_link(const struct device *dev,
-					enum phy_link_speed speeds)
+static int phy_mc_ksz8081_cfg_link(const struct device *dev, enum phy_link_speed speeds,
+				   enum phy_cfg_link_flag flags)
 {
 	const struct mc_ksz8081_config *config = dev->config;
 	struct mc_ksz8081_data *data = dev->data;
 	struct phy_link_state state = {};
 	int ret;
-	uint32_t anar;
+
+	if (flags & PHY_FLAG_AUTO_NEGOTIATION_DISABLED) {
+		LOG_ERR("Disabling auto-negotiation is not supported by this driver");
+		return -ENOTSUP;
+	}
 
 	/* Lock mutex */
 	ret = k_mutex_lock(&data->mutex, K_FOREVER);
@@ -346,39 +363,9 @@ static int phy_mc_ksz8081_cfg_link(const struct device *dev,
 		goto done;
 	}
 
-	/* Read ANAR register to write back */
-	ret = phy_mc_ksz8081_read(dev, MII_ANAR, &anar);
-	if (ret) {
-		LOG_ERR("Error reading phy (%d) advertising register", config->addr);
-		goto done;
-	}
-
-	/* Setup advertising register */
-	if (speeds & LINK_FULL_100BASE_T) {
-		anar |= MII_ADVERTISE_100_FULL;
-	} else {
-		anar &= ~MII_ADVERTISE_100_FULL;
-	}
-	if (speeds & LINK_HALF_100BASE_T) {
-		anar |= MII_ADVERTISE_100_HALF;
-	} else {
-		anar &= ~MII_ADVERTISE_100_HALF;
-	}
-	if (speeds & LINK_FULL_10BASE_T) {
-		anar |= MII_ADVERTISE_10_FULL;
-	} else {
-		anar &= ~MII_ADVERTISE_10_FULL;
-	}
-	if (speeds & LINK_HALF_10BASE_T) {
-		anar |= MII_ADVERTISE_10_HALF;
-	} else {
-		anar &= ~MII_ADVERTISE_10_HALF;
-	}
-
-	/* Write capabilities to advertising register */
-	ret = phy_mc_ksz8081_write(dev, MII_ANAR, anar);
-	if (ret) {
-		LOG_ERR("Error writing phy (%d) advertising register", config->addr);
+	ret = phy_mii_set_anar_reg(dev, speeds);
+	if ((ret < 0) && (ret != -EALREADY)) {
+		LOG_ERR("Error setting ANAR register for phy (%d)", config->addr);
 		goto done;
 	}
 

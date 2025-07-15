@@ -7,7 +7,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import collections
 import copy
-import glob
 import itertools
 import json
 import logging
@@ -28,11 +27,10 @@ try:
 except ImportError:
     print("Install the anytree module to use the --test-tree option")
 
-import list_boards
 import scl
 from twisterlib.config_parser import TwisterConfigParser
 from twisterlib.error import TwisterRuntimeError
-from twisterlib.platform import Platform
+from twisterlib.platform import Platform, generate_platforms
 from twisterlib.quarantine import Quarantine
 from twisterlib.statuses import TwisterStatus
 from twisterlib.testinstance import TestInstance
@@ -40,7 +38,6 @@ from twisterlib.testsuite import TestSuite, scan_testsuite_path
 from zephyr_module import parse_modules
 
 logger = logging.getLogger('twister')
-logger.setLevel(logging.DEBUG)
 
 ZEPHYR_BASE = os.getenv("ZEPHYR_BASE")
 if not ZEPHYR_BASE:
@@ -64,8 +61,6 @@ class Filters:
     TESTPLAN = 'testplan filter'
     # filters related to platform definition
     PLATFORM = 'Platform related filter'
-    # in case a test suite was quarantined.
-    QUARANTINE = 'Quarantine filter'
     # in case a test suite is skipped intentionally .
     SKIP = 'Skip filter'
     # in case of incompatibility between selected and allowed toolchains.
@@ -74,13 +69,77 @@ class Filters:
     MODULE = 'Module filter'
     # in case of missing env. variable required for a platform
     ENVIRONMENT = 'Environment filter'
-
-
 class TestLevel:
     name = None
     levels = []
     scenarios = []
+class TestConfiguration:
+    tc_schema_path = os.path.join(
+        ZEPHYR_BASE,
+        "scripts",
+        "schemas",
+        "twister",
+        "test-config-schema.yaml"
+    )
 
+    def __init__(self, config_file):
+        self.test_config = None
+        self.override_default_platforms = False
+        self.increased_platform_scope = True
+        self.default_platforms = []
+        self.parse(config_file)
+
+    def parse(self, config_file):
+        if os.path.exists(config_file):
+            tc_schema = scl.yaml_load(self.tc_schema_path)
+            self.test_config = scl.yaml_load_verify(config_file, tc_schema)
+        else:
+            raise TwisterRuntimeError(f"File {config_file} not found.")
+
+        platform_config = self.test_config.get('platforms', {})
+
+        self.override_default_platforms = platform_config.get('override_default_platforms', False)
+        self.increased_platform_scope = platform_config.get('increased_platform_scope', True)
+        self.default_platforms = platform_config.get('default_platforms', [])
+
+        self.options = self.test_config.get('options', {})
+
+
+    @staticmethod
+    def get_level(levels, name):
+        level = next((lvl for lvl in levels if lvl.name == name), None)
+        return level
+
+    def get_levels(self, scenarios):
+        levels = []
+        configured_levels = self.test_config.get('levels', [])
+
+        # Do first pass on levels to get initial data.
+        for level in configured_levels:
+            adds = []
+            for s in  level.get('adds', []):
+                r = re.compile(s)
+                adds.extend(list(filter(r.fullmatch, scenarios)))
+
+            test_level = TestLevel()
+            test_level.name = level['name']
+            test_level.scenarios = adds
+            test_level.levels = level.get('inherits', [])
+            levels.append(test_level)
+
+        # Go over levels again to resolve inheritance.
+        for level in configured_levels:
+            inherit = level.get('inherits', [])
+            _level = self.get_level(levels, level['name'])
+            if inherit:
+                for inherted_level in inherit:
+                    _inherited = self.get_level(levels, inherted_level)
+                    assert _inherited, "Unknown inherited level {inherted_level}"
+                    _inherited_scenarios = _inherited.scenarios
+                    level_scenarios = _level.scenarios if _level else []
+                    level_scenarios.extend(_inherited_scenarios)
+
+        return levels
 
 class TestPlan:
     __test__ = False  # for pytest to skip this class when collects tests
@@ -93,14 +152,6 @@ class TestPlan:
     quarantine_schema = scl.yaml_load(
         os.path.join(ZEPHYR_BASE,
                      "scripts", "schemas", "twister", "quarantine-schema.yaml"))
-
-    tc_schema_path = os.path.join(
-        ZEPHYR_BASE,
-        "scripts",
-        "schemas",
-        "twister",
-        "test-config-schema.yaml"
-    )
 
     SAMPLE_FILENAME = 'sample.yaml'
     TESTSUITE_FILENAME = 'testcase.yaml'
@@ -131,47 +182,9 @@ class TestPlan:
 
         self.run_individual_testsuite = []
         self.levels = []
-        self.test_config =  {}
+        self.test_config =  None
 
         self.name = "unnamed"
-
-    def get_level(self, name):
-        level = next((lvl for lvl in self.levels if lvl.name == name), None)
-        return level
-
-    def parse_configuration(self, config_file):
-        if os.path.exists(config_file):
-            tc_schema = scl.yaml_load(self.tc_schema_path)
-            self.test_config = scl.yaml_load_verify(config_file, tc_schema)
-        else:
-            raise TwisterRuntimeError(f"File {config_file} not found.")
-
-        levels = self.test_config.get('levels', [])
-
-        # Do first pass on levels to get initial data.
-        for level in levels:
-            adds = []
-            for s in  level.get('adds', []):
-                r = re.compile(s)
-                adds.extend(list(filter(r.fullmatch, self.scenarios)))
-
-            tl = TestLevel()
-            tl.name = level['name']
-            tl.scenarios = adds
-            tl.levels = level.get('inherits', [])
-            self.levels.append(tl)
-
-        # Go over levels again to resolve inheritance.
-        for level in levels:
-            inherit = level.get('inherits', [])
-            _level = self.get_level(level['name'])
-            if inherit:
-                for inherted_level in inherit:
-                    _inherited = self.get_level(inherted_level)
-                    assert _inherited, "Unknown inherited level {inherted_level}"
-                    _inherited_scenarios = _inherited.scenarios
-                    level_scenarios = _level.scenarios if _level else []
-                    level_scenarios.extend(_inherited_scenarios)
 
     def find_subtests(self):
         sub_tests = self.options.sub_test
@@ -193,6 +206,8 @@ class TestPlan:
         if self.options.test:
             self.run_individual_testsuite = self.options.test
 
+        self.test_config = TestConfiguration(self.env.test_config)
+
         self.add_configurations()
         num = self.add_testsuites(testsuite_filter=self.run_individual_testsuite)
         if num == 0:
@@ -208,7 +223,7 @@ class TestPlan:
             self.scenarios.append(ts.id)
 
         self.report_duplicates()
-        self.parse_configuration(config_file=self.env.test_config)
+        self.levels = self.test_config.get_levels(self.scenarios)
 
         # handle quarantine
         ql = self.options.quarantine_list
@@ -224,6 +239,10 @@ class TestPlan:
                 except scl.EmptyYamlFileException:
                     logger.debug(f'Quarantine file {quarantine_file} is empty')
             self.quarantine = Quarantine(ql)
+
+    def get_level(self, name):
+        level = next((lvl for lvl in self.levels if lvl.name == name), None)
+        return level
 
     def load(self):
 
@@ -437,105 +456,24 @@ class TestPlan:
         sys.stdout.write(what + "\n")
         sys.stdout.flush()
 
-    def find_twister_data(self, board_data_list, board_aliases):
-        """Find the twister data for a board in the list of board data based on the aliases"""
-        for board_data in board_data_list:
-            if board_data.get('identifier') in board_aliases:
-                return board_data
-
     def add_configurations(self):
         # Create a list of board roots as defined by the build system in general
         # Note, internally in twister a board root includes the `boards` folder
         # but in Zephyr build system, the board root is without the `boards` in folder path.
         board_roots = [Path(os.path.dirname(root)) for root in self.env.board_roots]
-        lb_args = Namespace(arch_roots=self.env.arch_roots, soc_roots=self.env.soc_roots,
-                            board_roots=board_roots, board=None, board_dir=None)
+        soc_roots = self.env.soc_roots
+        arch_roots = self.env.arch_roots
 
-        known_boards = list_boards.find_v2_boards(lb_args)
-        bdirs = {}
-        platform_config = self.test_config.get('platforms', {})
-
-        # helper function to initialize and add platforms
-        def init_and_add_platforms(data, board, target, qualifier, aliases):
-            platform = Platform()
-            if not new_config_found:
-                data = self.find_twister_data(bdirs[board.dir], aliases)
-                if not data:
-                    return
-            platform.load(board, target, aliases, data)
-            platform.qualifier = qualifier
-            if platform.name in [p.name for p in self.platforms]:
-                logger.error(f"Duplicate platform {platform.name} in {board.dir}")
-                raise Exception(f"Duplicate platform identifier {platform.name} found")
+        for platform in generate_platforms(board_roots, soc_roots, arch_roots):
             if not platform.twister:
-                return
+                continue
             self.platforms.append(platform)
 
-        for board in known_boards.values():
-            new_config_found = False
-            # don't load the same board data twice
-            if not bdirs.get(board.dir):
-                datas = []
-                for file in glob.glob(os.path.join(board.dir, "*.yaml")):
-                    if os.path.basename(file) == "twister.yaml":
-                        continue
-                    try:
-                        scp = TwisterConfigParser(file, Platform.platform_schema)
-                        sdata = scp.load()
-                        datas.append(sdata)
-                    except Exception as e:
-                        logger.error(f"Error loading {file}: {e!r}")
-                        self.load_errors += 1
-                        continue
-                bdirs[board.dir] = datas
-            data = {}
-            if os.path.exists(board.dir / 'twister.yaml'):
-                try:
-                    scp = TwisterConfigParser(board.dir / 'twister.yaml', Platform.platform_schema)
-                    data = scp.load()
-                except Exception as e:
-                    logger.error(f"Error loading {board.dir / 'twister.yaml'}: {e!r}")
-                    self.load_errors += 1
-                    continue
-                new_config_found = True
-
-
-
-            for qual in list_boards.board_v2_qualifiers(board):
-
-                if board.revisions:
-                    for rev in board.revisions:
-                        if rev.name:
-                            target = f"{board.name}@{rev.name}/{qual}"
-                            aliases = [target]
-                            if rev.name == board.revision_default:
-                                aliases.append(f"{board.name}/{qual}")
-                            if '/' not in qual and len(board.socs) == 1:
-                                if rev.name == board.revision_default:
-                                    aliases.append(f"{board.name}")
-                                aliases.append(f"{board.name}@{rev.name}")
-                        else:
-                            target = f"{board.name}/{qual}"
-                            aliases = [target]
-                            if '/' not in qual and len(board.socs) == 1 \
-                                    and rev.name == board.revision_default:
-                                aliases.append(f"{board.name}")
-
-                        init_and_add_platforms(data, board, target, qual, aliases)
-                else:
-                    target = f"{board.name}/{qual}"
-                    aliases = [target]
-                    if '/' not in qual and len(board.socs) == 1:
-                        aliases.append(board.name)
-                    init_and_add_platforms(data, board, target, qual, aliases)
-
-        for platform in self.platforms:
-            if not platform_config.get('override_default_platforms', False):
+            if not self.test_config.override_default_platforms:
                 if platform.default:
                     self.default_platforms.append(platform.name)
-                    #logger.debug(f"adding {platform.name} to default platforms")
                 continue
-            for pp in platform_config.get('default_platforms', []):
+            for pp in self.test_config.default_platforms:
                 if pp in platform.aliases:
                     logger.debug(f"adding {platform.name} to default platforms (override  mode)")
                     self.default_platforms.append(platform.name)
@@ -676,18 +614,21 @@ class TestPlan:
 
     def handle_quarantined_tests(self, instance: TestInstance, plat: Platform):
         if self.quarantine:
-            simulator = plat.simulator_by_name(self.options)
+            sim_name = plat.simulation
+            if sim_name != "na" and (simulator := plat.simulator_by_name(self.options.sim_name)):
+                sim_name = simulator.name
             matched_quarantine = self.quarantine.get_matched_quarantine(
                 instance.testsuite.id,
                 plat.name,
                 plat.arch,
-                simulator.name if simulator is not None else 'na'
+                sim_name
             )
             if matched_quarantine and not self.options.quarantine_verify:
-                instance.add_filter("Quarantine: " + matched_quarantine, Filters.QUARANTINE)
+                instance.status = TwisterStatus.SKIP
+                instance.reason = "Quarantine: " + matched_quarantine
                 return
             if not matched_quarantine and self.options.quarantine_verify:
-                instance.add_filter("Not under quarantine", Filters.QUARANTINE)
+                instance.add_filter("Not under quarantine", Filters.CMD_LINE)
 
     def load_from_file(self, file, filter_platform=None):
         if filter_platform is None:
@@ -814,7 +755,7 @@ class TestPlan:
             logger.info("Selecting default platforms per testsuite scenario")
             default_platforms = True
         elif emu_filter:
-            logger.info("Selecting emulation platforms per testsuite scenraio")
+            logger.info("Selecting emulation platforms per testsuite scenario")
             emulation_platforms = True
         elif vendor_filter:
             vendor_platforms = True
@@ -847,30 +788,35 @@ class TestPlan:
         else:
             platforms = self.platforms
 
-        platform_config = self.test_config.get('platforms', {})
+        # test configuration options
+        test_config_options = self.test_config.options
+        integration_mode_list = test_config_options.get('integration_mode', [])
+
         logger.info("Building initial testsuite list...")
 
         keyed_tests = {}
-
         for _, ts in self.testsuites.items():
-            if (
-                ts.build_on_all
-                and not platform_filter
-                and platform_config.get('increased_platform_scope', True)
-            ):
-                platform_scope = self.platforms
-            elif ts.integration_platforms:
-                integration_platforms = list(
+            if ts.integration_platforms:
+                _integration_platforms = list(
                     filter(lambda item: item.name in ts.integration_platforms, self.platforms)
                 )
-                if self.options.integration:
-                    platform_scope = integration_platforms
+            else:
+                _integration_platforms = []
+
+            if (ts.build_on_all and not platform_filter and
+                self.test_config.increased_platform_scope):
+                # if build_on_all is set, we build on all platforms
+                platform_scope = self.platforms
+            elif ts.integration_platforms and self.options.integration:
+                # if integration is set, we build on integration platforms
+                platform_scope = _integration_platforms
+            elif ts.integration_platforms and not platform_filter:
+                # if integration platforms are set, we build on those and integration mode is set
+                # for this test suite, we build on integration platforms
+                if any(ts.id.startswith(i) for i in integration_mode_list):
+                    platform_scope = _integration_platforms
                 else:
-                    # if not in integration mode, still add integration platforms to the list
-                    if not platform_filter:
-                        platform_scope = platforms + integration_platforms
-                    else:
-                        platform_scope = platforms
+                    platform_scope = platforms + _integration_platforms
             else:
                 platform_scope = platforms
 
@@ -882,7 +828,7 @@ class TestPlan:
                 ts.platform_allow
                 and not platform_filter
                 and not integration
-                and platform_config.get('increased_platform_scope', True)
+                and self.test_config.increased_platform_scope
             ):
                 a = set(platform_scope)
                 b = set(filter(lambda item: item.name in ts.platform_allow, self.platforms))
@@ -1013,6 +959,8 @@ class TestPlan:
                         "Environment ({}) not satisfied".format(", ".join(plat.env)),
                         Filters.ENVIRONMENT
                     )
+                if plat.type == 'native' and sys.platform != 'linux':
+                    instance.add_filter("Native platform requires Linux", Filters.ENVIRONMENT)
 
                 if not force_toolchain \
                         and toolchain and (toolchain not in plat.supported_toolchains):
@@ -1035,7 +983,10 @@ class TestPlan:
                 if ts.depends_on:
                     dep_intersection = ts.depends_on.intersection(set(plat.supported))
                     if dep_intersection != set(ts.depends_on):
-                        instance.add_filter("No hardware support", Filters.PLATFORM)
+                        instance.add_filter(
+                            f"No hardware support for {set(ts.depends_on)-dep_intersection}",
+                            Filters.PLATFORM
+                        )
 
                 if plat.flash < ts.min_flash:
                     instance.add_filter("Not enough FLASH", Filters.PLATFORM)
@@ -1220,13 +1171,15 @@ class TestPlan:
 
         self.selected_platforms = set(p.platform.name for p in self.instances.values())
 
-        filtered_instances = list(
-            filter(lambda item:  item.status == TwisterStatus.FILTER, self.instances.values())
+        filtered_and_skipped_instances = list(
+            filter(
+            lambda item: item.status in [TwisterStatus.FILTER, TwisterStatus.SKIP],
+            self.instances.values()
+            )
         )
-        for filtered_instance in filtered_instances:
-            change_skip_to_error_if_integration(self.options, filtered_instance)
-
-            filtered_instance.add_missing_case_status(filtered_instance.status)
+        for inst in filtered_and_skipped_instances:
+            change_skip_to_error_if_integration(self.options, inst)
+            inst.add_missing_case_status(inst.status)
 
     def add_instances(self, instance_list):
         for instance in instance_list:
@@ -1315,8 +1268,10 @@ def change_skip_to_error_if_integration(options, instance):
         filters = {t['type'] for t in instance.filters}
         ignore_filters ={Filters.CMD_LINE, Filters.SKIP, Filters.PLATFORM_KEY,
                          Filters.TOOLCHAIN, Filters.MODULE, Filters.TESTPLAN,
-                         Filters.QUARANTINE, Filters.ENVIRONMENT}
+                         Filters.ENVIRONMENT}
         if filters.intersection(ignore_filters):
+            return
+        if "quarantine" in instance.reason.lower():
             return
         instance.status = TwisterStatus.ERROR
         instance.reason += " but is one of the integration platforms"

@@ -657,7 +657,7 @@ static int littlefs_flash_init(struct fs_littlefs *fs, void *dev_id)
 	/* Open flash area */
 	ret = flash_area_open(area_id, fap);
 	if ((ret < 0) || (*fap == NULL)) {
-		LOG_ERR("can't open flash area %d", area_id);
+		LOG_ERR("can't open flash area %d, err %d", area_id, ret);
 		return -ENODEV;
 	}
 
@@ -793,7 +793,10 @@ static int littlefs_init_cfg(struct fs_littlefs *fs, int flags)
 	uint32_t disk_version = lcp->disk_version;
 
 	if (disk_version == 0) {
-		disk_version = LFS_DISK_VERSION;
+		disk_version = CONFIG_FS_LITTLEFS_DISK_VERSION_NUMBER;
+		if (disk_version == 0) {
+			disk_version = LFS_DISK_VERSION;
+		}
 	}
 #endif /* CONFIG_FS_LITTLEFS_DISK_VERSION */
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 Renesas Electronics Corporation
+ * Copyright (c) 2024-2025 Renesas Electronics Corporation
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,6 +23,28 @@ static volatile uint32_t *mstp_regs[] = {
 static volatile uint32_t *mstp_regs[] = {};
 #endif
 
+#if defined(CONFIG_CORTEX_M_SYSTICK)
+/* If a CPU clock exists in the system, it will be the source for the CPU */
+#if BSP_FEATURE_CGC_HAS_CPUCLK
+
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(cpu0))
+#define sys_clk DT_NODELABEL(cpuclk0)
+#elif DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(cpu1))
+#define sys_clk DT_NODELABEL(cpuclk1)
+#else
+#define sys_clk DT_NODELABEL(cpuclk)
+#endif
+
+#else
+#define sys_clk DT_NODELABEL(iclk)
+#endif
+
+#define SYS_CLOCK_HZ (BSP_STARTUP_SOURCE_CLOCK_HZ / DT_PROP(sys_clk, div))
+
+BUILD_ASSERT(CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC == SYS_CLOCK_HZ,
+	     "CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC must match the configuration of the clock "
+	     "supplying the CPU ");
+#endif
 static int clock_control_renesas_ra_on(const struct device *dev, clock_control_subsys_t sys)
 {
 	struct clock_control_ra_subsys_cfg *subsys_clk = (struct clock_control_ra_subsys_cfg *)sys;
@@ -49,11 +71,13 @@ static int clock_control_renesas_ra_off(const struct device *dev, clock_control_
 static int clock_control_renesas_ra_get_rate(const struct device *dev, clock_control_subsys_t sys,
 					     uint32_t *rate)
 {
+	ARG_UNUSED(sys);
+
 	const struct clock_control_ra_pclk_cfg *config = dev->config;
 	uint32_t clk_src_rate;
 	uint32_t clk_div_val;
 
-	if (!dev || !sys || !rate) {
+	if (!dev || !rate) {
 		return -EINVAL;
 	}
 

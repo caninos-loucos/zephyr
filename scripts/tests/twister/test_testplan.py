@@ -17,7 +17,7 @@ ZEPHYR_BASE = os.getenv("ZEPHYR_BASE")
 sys.path.insert(0, os.path.join(ZEPHYR_BASE, "scripts/pylib/twister"))
 
 from twisterlib.statuses import TwisterStatus
-from twisterlib.testplan import TestPlan, change_skip_to_error_if_integration
+from twisterlib.testplan import TestPlan, TestConfiguration, change_skip_to_error_if_integration
 from twisterlib.testinstance import TestInstance
 from twisterlib.testsuite import TestSuite
 from twisterlib.platform import Platform
@@ -60,7 +60,7 @@ def test_add_configurations_short(test_data, class_env, board_root_dir):
     """
     class_env.board_roots = [os.path.abspath(test_data + board_root_dir)]
     plan = TestPlan(class_env)
-    plan.parse_configuration(config_file=class_env.test_config)
+    plan.test_config = TestConfiguration(class_env.test_config)
     if board_root_dir == "board_config":
         plan.add_configurations()
         print(sorted(plan.default_platforms))
@@ -69,6 +69,7 @@ def test_add_configurations_short(test_data, class_env, board_root_dir):
         plan.add_configurations()
         assert sorted(plan.default_platforms) != sorted(['demo_board_1'])
 
+    plan.levels = plan.test_config.get_levels(plan.scenarios)
 
 def test_get_all_testsuites_short(class_testplan, all_testsuites_dict):
     """ Testing get_all_testsuites function of TestPlan class in Twister """
@@ -346,7 +347,7 @@ def test_quarantine_short(class_testplan, platforms_list, test_data,
                 assert instance.reason == "Not under quarantine"
         else:
             if testname in expected_val:
-                assert instance.status == TwisterStatus.FILTER
+                assert instance.status == TwisterStatus.SKIP
                 assert instance.reason == "Quarantine: " + expected_val[testname]
             else:
                 assert instance.status == TwisterStatus.NONE
@@ -470,12 +471,12 @@ def test_testplan_parse_configuration(tmp_path, config_yaml, expected_scenarios)
         tmp_config_file.write_text(config_yaml)
 
     with pytest.raises(TwisterRuntimeError) if not config_yaml else nullcontext():
-        testplan.parse_configuration(tmp_config_file)
-
-    if not testplan.levels:
-        assert expected_scenarios == {}
-    for level in testplan.levels:
-        assert sorted(level.scenarios) == sorted(expected_scenarios[level.name])
+        tc = TestConfiguration(tmp_config_file)
+        testplan.levels = tc.get_levels(testplan.scenarios)
+        if not testplan.levels:
+            assert expected_scenarios == {}
+        for level in testplan.levels:
+            assert sorted(level.scenarios) == sorted(expected_scenarios[level.name])
 
 
 TESTDATA_2 = [
@@ -535,7 +536,6 @@ TESTDATA_3 = [
     (0, 0, [], False, [], TwisterRuntimeError, []),
     (1, 1, [], False, [], TwisterRuntimeError, []),
     (1, 0, [], True, [], TwisterRuntimeError, ['No quarantine list given to be verified']),
-#    (1, 0, ['qfile.yaml'], False, ['# empty'], None, ['Quarantine file qfile.yaml is empty']),
     (1, 0, ['qfile.yaml'], False, ['- platforms:\n  - demo_board_3\n  comment: "board_3"'], None, []),
 ]
 
@@ -557,15 +557,22 @@ def test_testplan_discover(
     exception,
     expected_logs
 ):
+    # Just a dummy test configuration file
+    tc = "options: {}\n"
+    tmp_tc = tmp_path / 'test_config.yaml'
+    tmp_tc.write_text(tc)
+
     for qf, data in zip(ql, ql_data):
         tmp_qf = tmp_path / qf
         tmp_qf.write_text(data)
 
-    testplan = TestPlan(env=mock.Mock())
+    env = mock.Mock()
+    env.test_config = tmp_tc
+    testplan = TestPlan(env=env)
     testplan.options = mock.Mock(
         test='ts1',
         quarantine_list=[tmp_path / qf for qf in ql],
-        quarantine_verify=qv,
+        quarantine_verify=qv
     )
     testplan.testsuites = {
         'ts1': mock.Mock(id=1),
@@ -576,7 +583,7 @@ def test_testplan_discover(
     testplan.add_testsuites = mock.Mock(return_value=added_testsuite_count)
     testplan.find_subtests = mock.Mock()
     testplan.report_duplicates = mock.Mock()
-    testplan.parse_configuration = mock.Mock()
+    testplan.test_config = mock.Mock()
     testplan.add_configurations = mock.Mock()
 
     with pytest.raises(exception) if exception else nullcontext():
@@ -1110,179 +1117,30 @@ def test_testplan_add_configurations(
     expected_platform_names,
     expected_defaults
 ):
-    # tmp_path
-    # └ boards  <- board root
-    #   ├ zephyr
-    #   │ ├ p1
-    #   │ | ├ p1e1.yaml
-    #   │ | └ p1e2.yaml
-    #   │ └ p2
-    #   │   ├ p2.yaml
-    #   │   └ p2-1.yaml <- duplicate
-    #   │   └ p2-2.yaml <- load error
-    #   └ arm
-    #     └ p3
-    #       ├ p3.yaml
-    #       └ p3_B.conf
-    tmp_soc_root_dir = tmp_path / 'soc'
-    tmp_soc_root_dir.mkdir()
-
-    tmp_vend1_dir = tmp_soc_root_dir / 'zephyr'
-    tmp_vend1_dir.mkdir()
-
-    tmp_soc1_dir = tmp_vend1_dir / 's1'
-    tmp_soc1_dir.mkdir()
-
-    soc1_yaml = """\
-family:
-  - name: zephyr
-    series:
-      - name: zephyr_testing
-        socs:
-          - name: unit_testing
-"""
-    soc1_yamlfile = tmp_soc1_dir / 'soc.yml'
-    soc1_yamlfile.write_text(soc1_yaml)
-
-    tmp_board_root_dir = tmp_path / 'boards'
-    tmp_board_root_dir.mkdir()
-
-    tmp_vend1_dir = tmp_board_root_dir / 'zephyr'
-    tmp_vend1_dir.mkdir()
-
-    tmp_p1_dir = tmp_vend1_dir / 'p1'
-    tmp_p1_dir.mkdir()
-
-    p1e1_bs_yaml = """\
-boards:
-
-  - name: p1e1
-    vendor: zephyr
-    socs:
-      - name: unit_testing
-  - name: p1e2
-    vendor: zephyr
-    socs:
-      - name: unit_testing
-"""
-    p1e1_yamlfile = tmp_p1_dir / 'board.yml'
-    p1e1_yamlfile.write_text(p1e1_bs_yaml)
-
-    p1e1_yaml = """\
-identifier: p1e1
-name: Platform 1 Edition 1
-type: native
-arch: x86
-vendor: zephyr
-toolchain:
-  - zephyr
-twister: False
-"""
-    p1e1_yamlfile = tmp_p1_dir / 'p1e1.yaml'
-    p1e1_yamlfile.write_text(p1e1_yaml)
-
-    p1e2_yaml = """\
-identifier: p1e2
-name: Platform 1 Edition 2
-type: native
-arch: x86
-vendor: zephyr
-toolchain:
-  - zephyr
-"""
-    p1e2_yamlfile = tmp_p1_dir / 'p1e2.yaml'
-    p1e2_yamlfile.write_text(p1e2_yaml)
-
-    tmp_p2_dir = tmp_vend1_dir / 'p2'
-    tmp_p2_dir.mkdir()
-
-    p2_bs_yaml = """\
-boards:
-
-  - name: p2
-    vendor: zephyr
-    socs:
-      - name: unit_testing
-  - name: p2_2
-    vendor: zephyr
-    socs:
-      - name: unit_testing
-"""
-    p2_yamlfile = tmp_p2_dir / 'board.yml'
-    p2_yamlfile.write_text(p2_bs_yaml)
-
-    p2_yaml = """\
-identifier: p2/unit_testing
-name: Platform 2
-type: sim
-arch: x86
-vendor: vendor2
-toolchain:
-  - zephyr
-testing:
-  default: True
-"""
-    p2_yamlfile = tmp_p2_dir / 'p2.yaml'
-    p2_yamlfile.write_text(p2_yaml)
-
-
-    p2_2_yaml = """\
-testing:
-  ć#@%!#!#^#@%@:1.0
-identifier: p2_2
-name: Platform 2 2
-type: sim
-arch: x86
-vendor: vendor2
-toolchain:
-  - zephyr
-"""
-    p2_2_yamlfile = tmp_p2_dir / 'p2-2.yaml'
-    p2_2_yamlfile.write_text(p2_2_yaml)
-
-    tmp_vend2_dir = tmp_board_root_dir / 'arm'
-    tmp_vend2_dir.mkdir()
-
-    tmp_p3_dir = tmp_vend2_dir / 'p3'
-    tmp_p3_dir.mkdir()
-
-    p3_bs_yaml = """\
-boards:
-  - name: p3
-    vendor: zephyr
-    socs:
-      - name: unit_testing
-"""
-    p3_yamlfile = tmp_p3_dir / 'board.yml'
-    p3_yamlfile.write_text(p3_bs_yaml)
-
-    p3_yaml = """\
-identifier: p3
-name: Platform 3
-type: unit
-arch: arm
-vendor: vendor3
-toolchain:
-  - zephyr
-testing:
-  default: True
-"""
-    p3_yamlfile = tmp_p3_dir / 'p3.yaml'
-    p3_yamlfile.write_text(p3_yaml)
-
-    env = mock.Mock(board_roots=[tmp_board_root_dir],soc_roots=[tmp_path], arch_roots=[tmp_path])
+    env = mock.Mock(board_roots=[tmp_path / 'boards'], soc_roots=[tmp_path], arch_roots=[tmp_path])
 
     testplan = TestPlan(env=env)
+    testplan.test_config = mock.Mock()
+    testplan.test_config.override_default_platforms = override_default_platforms
+    testplan.test_config.default_platforms = ['p3', 'p1e1']
 
-    testplan.test_config = {
-        'platforms': {
-            'override_default_platforms': override_default_platforms,
-            'default_platforms': ['p3', 'p1e1']
-        }
-    }
+    def mock_gen_plat(board_roots, soc_roots, arch_roots):
+        assert [tmp_path] == board_roots
+        assert [tmp_path] == soc_roots
+        assert [tmp_path] == arch_roots
 
+        platforms = [
+            mock.Mock(aliases=['p1e1/unit_testing', 'p1e1'], twister=False, default=False),
+            mock.Mock(aliases=['p1e2/unit_testing', 'p1e2'], twister=True, default=False),
+            mock.Mock(aliases=['p2/unit_testing', 'p2'], twister=True, default=True),
+            mock.Mock(aliases=['p3/unit_testing', 'p3'], twister=True, default=True),
+        ]
+        for platform in platforms:
+            type(platform).name = mock.PropertyMock(return_value=platform.aliases[0])
+            yield platform
 
-    testplan.add_configurations()
+    with mock.patch('twisterlib.testplan.generate_platforms', mock_gen_plat):
+        testplan.add_configurations()
 
     if expected_defaults is not None:
         print(expected_defaults)
@@ -1890,7 +1748,7 @@ TESTDATA_14 = [
     ('bad platform', 'dummy reason', [],
      'dummy status', 'dummy reason'),
     ('good platform', 'quarantined', [],
-     TwisterStatus.ERROR, 'quarantined but is one of the integration platforms'),
+     'dummy status', 'quarantined'),
     ('good platform', 'dummy reason', [{'type': 'command line filter'}],
      'dummy status', 'dummy reason'),
     ('good platform', 'dummy reason', [{'type': 'Skip filter'}],

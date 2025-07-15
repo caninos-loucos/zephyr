@@ -22,6 +22,9 @@ config LV_CONF_SKIP
 	bool
 	default n
 
+config LV_USE_PRIVATE_API
+	bool
+
 config LV_USE_LOG
 	bool
 
@@ -91,6 +94,10 @@ config LV_COLOR_16_SWAP
 	bool "Swap the 2 bytes of RGB565 color."
 	depends on LV_COLOR_DEPTH_16
 
+config LV_Z_COLOR_MONO_HW_INVERSION
+	bool "Hardware pixel inversion (disables software pixel inversion)."
+	depends on LV_COLOR_DEPTH_1
+
 config LV_Z_FLUSH_THREAD
 	bool "Flush LVGL frames in a separate thread"
 	help
@@ -158,6 +165,7 @@ config LV_DRAW_DMA2D_HAL_INCLUDE
 config LV_Z_USE_OSAL
 	bool "Use OSAL enabling parallel rendering"
 	depends on DYNAMIC_THREAD
+	select LV_USE_PRIVATE_API
 	help
 	  Use the Zephyr LVGL OSAL to enable parallel rendering
 	  pipelines.

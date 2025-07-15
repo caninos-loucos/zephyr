@@ -68,7 +68,7 @@ const sim_clock_config_t simConfig_BOARD_BootClockRUN = {
 
 const osc_config_t oscConfig_BOARD_BootClockRUN = {
 	.freq = DT_PROP(OSC_NODE, clock_frequency),
-	.capLoad = 0,
+	.capLoad = DT_PROP_OR(OSC_NODE, load_capacitance_picofarads, 0),
 #if DT_ENUM_HAS_VALUE(OSC_NODE, mode, external)
 	.workMode = kOSC_ModeExt,
 #elif DT_ENUM_HAS_VALUE(OSC_NODE, mode, low_power)
@@ -83,7 +83,7 @@ const osc_config_t oscConfig_BOARD_BootClockRUN = {
 	}
 };
 
-static void clock_init(void)
+__weak void clock_init(void)
 {
 	/* Set the system clock dividers in SIM to safe value. */
 	CLOCK_SetSimSafeDivs();
@@ -96,9 +96,13 @@ static void clock_init(void)
 	CLOCK_SetSimConfig(&simConfig_BOARD_BootClockRUN);
 	/* Set SystemCoreClock variable. */
 	SystemCoreClock = DT_PROP(DT_NODELABEL(cpu0), clock_frequency);
-	/* Set LPUART0 clock source. */
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart0))
+	/* Set LPUART0 clock source. */
 	CLOCK_SetLpuart0Clock(LPUART_CLOCK_SEL(lpuart0));
+#endif
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(lpuart1))
+	/* Set LPUART1 clock source. */
+	CLOCK_SetLpuart1Clock(LPUART_CLOCK_SEL(lpuart1));
 #endif
 #if DT_HAS_COMPAT_STATUS_OKAY(nxp_kinetis_tpm)
 	/* All TPM instances share common clock source for counter clock.

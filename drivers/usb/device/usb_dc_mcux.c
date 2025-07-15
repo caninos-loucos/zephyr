@@ -90,6 +90,7 @@ BUILD_ASSERT(NUM_INSTS <= 1, "Only one USB device supported");
 #define CONTROLLER_ID	kUSB_ControllerLpcIp3511Fs0
 #endif /* LPC55s69 */
 #elif defined(CONFIG_SOC_SERIES_IMXRT11XX) || \
+	defined(CONFIG_SOC_SERIES_IMXRT118X) || \
 	defined(CONFIG_SOC_SERIES_IMXRT10XX) || \
 	defined(CONFIG_SOC_SERIES_MCXN)
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(usb1))
@@ -97,11 +98,8 @@ BUILD_ASSERT(NUM_INSTS <= 1, "Only one USB device supported");
 #elif DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(usb2))
 #define CONTROLLER_ID kUSB_ControllerEhci1
 #endif /* IMX RT */
-#elif defined(CONFIG_SOC_SERIES_RW6XX)
-#define CONTROLLER_ID kUSB_ControllerEhci0
 #else
-/* If SOC has EHCI or LPCIP3511 then probably just need to add controller ID to this code */
-#error "USB driver does not yet support this SOC"
+#define CONTROLLER_ID kUSB_ControllerEhci0
 #endif /* CONTROLLER ID */
 
 /* We do not need a buffer for the write side on platforms that have USB RAM.
@@ -228,6 +226,7 @@ int usb_dc_detach(void)
 		return -EIO;
 	}
 
+	irq_disable(DT_INST_IRQN(0));
 	status = dev_state.dev_struct.controllerInterface->deviceDeinit(
 						   dev_state.dev_struct.controllerHandle);
 	if (kStatus_USB_Success != status) {
@@ -580,6 +579,18 @@ int usb_dc_ep_write(const uint8_t ep, const uint8_t *const data,
 
 	if (ret_bytes) {
 		*ret_bytes = len_to_send;
+	}
+
+	return 0;
+}
+
+int usb_dc_wakeup_request(void)
+{
+	usb_status_t status = dev_state.dev_struct.controllerInterface->deviceControl(
+		dev_state.dev_struct.controllerHandle, kUSB_DeviceControlResume, NULL);
+
+	if (status != kStatus_USB_Success) {
+		return -EIO;
 	}
 
 	return 0;

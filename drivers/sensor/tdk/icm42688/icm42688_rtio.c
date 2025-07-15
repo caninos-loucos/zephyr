@@ -28,7 +28,7 @@ static int icm42688_rtio_sample_fetch(const struct device *dev, int16_t readings
 		return res;
 	}
 
-	if (!FIELD_GET(BIT_INT_STATUS_DATA_RDY, status)) {
+	if (!FIELD_GET(BIT_DATA_RDY_INT, status)) {
 		return -EBUSY;
 	}
 
@@ -66,7 +66,12 @@ static void icm42688_submit_one_shot(const struct device *dev, struct rtio_iodev
 
 	edata = (struct icm42688_encoded_data *)buf;
 
-	icm42688_encode(dev, channels, num_channels, buf);
+	rc = icm42688_encode(dev, channels, num_channels, buf);
+	if (rc != 0) {
+		LOG_ERR("Failed to encode sensor data");
+		rtio_iodev_sqe_err(iodev_sqe, rc);
+		return;
+	}
 
 	rc = icm42688_rtio_sample_fetch(dev, edata->readings);
 	/* Check that the fetch succeeded */
@@ -107,4 +112,5 @@ void icm42688_submit(const struct device *dev, struct rtio_iodev_sqe *iodev_sqe)
 	rtio_work_req_submit(req, iodev_sqe, icm42688_submit_sync);
 }
 
-BUILD_ASSERT(sizeof(struct icm42688_decoder_header) == 9);
+BUILD_ASSERT(sizeof(struct icm42688_decoder_header) == 15,
+	"icm42688_decoder_header size is not equal to 15");

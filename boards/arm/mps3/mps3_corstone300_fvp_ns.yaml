@@ -1,4 +1,4 @@
-# Copyright 2024 Arm Limited and/or its affiliates <open-source-office@arm.com>
+# Copyright 2024-2025 Arm Limited and/or its affiliates <open-source-office@arm.com>
 # SPDX-License-Identifier: Apache-2.0
 
 identifier: mps3/corstone300/fvp/ns
@@ -7,13 +7,11 @@ type: mcu
 arch: arm
 ram: 2048
 flash: 512
-# Related issue #81656
-twister: false
 toolchain:
   - gnuarmemb
   - zephyr
-  - xtools
 testing:
   default: true
+  timeout_multiplier: 4
   only_tags:
     - trusted-firmware-m

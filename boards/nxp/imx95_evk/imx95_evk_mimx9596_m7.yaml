@@ -13,9 +13,15 @@ flash: 256
 toolchain:
   - zephyr
   - gnuarmemb
-  - xtools
 supported:
   - uart
   - i2c
   - pwm
+  - spi
+  - netif:eth
+  - counter
+  - dma
+testing:
+  binaries:
+    - flash.bin
 vendor: nxp
