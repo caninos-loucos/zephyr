@@ -319,6 +319,9 @@ manifest:
       groups:
         - debug
       revision: 33e5c23cbedda5ba12dbe50c4baefb362a791001
+    - name: nanopb
+      revision: 7307ce399b81ddcb3c3a5dc862c52d4754328d38
+      path: modules/lib/nanopb
     - name: net-tools
       revision: 986bfeb040df3d9029366de8aea4ce1f84e93780
       path: tools/net-tools
@@ -360,7 +363,7 @@ manifest:
       groups:
         - tee
     - name: trusted-firmware-m
-      revision: d38260c937f957e4617691daebc7b565e82a84c4
+      revision: 021e2bbd50c215e41710a72e05abce3224f074a7
       path: modules/tee/tf-m/trusted-firmware-m
       groups:
         - tee
