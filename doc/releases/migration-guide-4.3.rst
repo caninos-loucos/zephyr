@@ -32,17 +32,54 @@ Boards
 Device Drivers and Devicetree
 *****************************
 
+.. zephyr-keep-sorted-start re(^\w)
+
+Sensors
+=======
+
+* Nodes with compatible property :dtcompatible:`invensense,icm42688` now additionally need to also
+  include :dtcompatible:`invensense,icm4268x` in order to work.
+
+Stepper
+=======
+
+* :dtcompatible:`zephyr,gpio-stepper` has been replaced by :dtcompatible:`zephyr,h-bridge-stepper`.
+
+.. zephyr-keep-sorted-stop
+
 Bluetooth
 *********
+
+.. zephyr-keep-sorted-start re(^\w)
+
+.. zephyr-keep-sorted-stop
+
+Ethernet
+========
+
+* The :dtcompatible:`microchip,vsc8541` PHY driver now expects the reset-gpios entry to specify
+  the GPIO_ACTIVE_LOW flag when the reset is being used as active low. Previously the active-low
+  nature was hard-coded into the driver. (:github:`91726`).
 
 Networking
 **********
 
+.. zephyr-keep-sorted-start re(^\w)
+
+.. zephyr-keep-sorted-stop
+
 Other subsystems
 ****************
 
+.. zephyr-keep-sorted-start re(^\w)
+
+.. zephyr-keep-sorted-stop
+
 Modules
 *******
+
+* The TinyCrypt library was removed as the upstream version is no longer maintained.
+  PSA Crypto API is now the recommended cryptographic library for Zephyr.
 
 Architectures
 *************

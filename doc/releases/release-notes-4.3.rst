@@ -51,6 +51,9 @@ API Changes
 Removed APIs and options
 ========================
 
+* The TinyCrypt library was removed as the upstream version is no longer maintained.
+  PSA Crypto API is now the recommended cryptographic library for Zephyr.
+
 Deprecated APIs and options
 ===========================
 
@@ -62,6 +65,14 @@ New APIs and options
   fancy just list the link, that should contain the documentation. If you feel
   like you need to add more details, add them in the API documentation code
   instead.
+
+.. zephyr-keep-sorted-start re(^\* \w)
+
+* Settings
+
+   * :kconfig:option:`CONFIG_SETTINGS_TFM_ITS`
+
+.. zephyr-keep-sorted-stop
 
 New Boards
 **********
@@ -79,6 +90,15 @@ New Drivers
   Same as above for boards, this will also be recomputed at the time of the release.
   Just link the driver, further details go in the binding description
 
+* Interrupt controller
+
+   * STM32 EXTI interrupt/event controller (:dtcompatible:`st,stm32-exti`) has a dedicated driver and API now, separate from STM32 GPIO Interrupt Control driver.
+
+* RTC
+
+   * STM32 RTC driver has been updated to use the new STM32 EXTI interrupt controller API
+
+
 New Samples
 ***********
 
@@ -92,3 +112,6 @@ Other notable changes
 ..
   Any more descriptive subsystem or driver changes. Do you really want to write
   a paragraph or is it enough to link to the api/driver/Kconfig/board page above?
+
+* Removed support for Nordic Semiconductor nRF54L20 PDK (``nrf54l20pdk``) since it is
+  replaced with :zephyr:board:`nrf54lm20dk` (``nrf54lm20dk``).
