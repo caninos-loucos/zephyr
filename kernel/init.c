@@ -28,6 +28,7 @@
 #include <zephyr/platform/hooks.h>
 #include <ksched.h>
 #include <kthread.h>
+#include <ipi.h>
 #include <zephyr/sys/dlist.h>
 #include <kernel_internal.h>
 #include <zephyr/drivers/entropy.h>
@@ -135,9 +136,6 @@ enum init_level {
 #ifdef CONFIG_SMP
 extern const struct init_entry __init_SMP_start[];
 #endif /* CONFIG_SMP */
-
-TYPE_SECTION_START_EXTERN(struct service, service);
-TYPE_SECTION_END_EXTERN(struct service, service);
 
 /*
  * storage space for the interrupt stack
@@ -251,9 +249,8 @@ void z_bss_zero(void)
 		       ((uintptr_t) &__gcov_bss_end - (uintptr_t) &__gcov_bss_start));
 #endif /* CONFIG_COVERAGE_GCOV */
 #ifdef CONFIG_NOCACHE_MEMORY
-z_early_memset(&_nocache_ram_start, 0,
-		   (uintptr_t) &_nocache_ram_end
-		   - (uintptr_t) &_nocache_ram_start);
+	z_early_memset(&_nocache_ram_start, 0,
+		       (uintptr_t)&_nocache_ram_end - (uintptr_t)&_nocache_ram_start);
 #endif
 }
 
@@ -340,12 +337,6 @@ static int do_device_init(const struct device *dev)
 	return rc;
 }
 
-static inline bool is_entry_about_service(const void *obj)
-{
-	return (obj >= (void *)_service_list_start &&
-		obj < (void *)_service_list_end);
-}
-
 /**
  * @brief Execute all the init entry initialization functions at a given level
  *
@@ -374,26 +365,17 @@ static void z_sys_init_run_level(enum init_level level)
 	const struct init_entry *entry;
 
 	for (entry = levels[level]; entry < levels[level+1]; entry++) {
+		const struct device *dev = entry->dev;
 		int result = 0;
 
-		if (unlikely(entry->_init_object == NULL)) {
-			continue;
-		}
-
 		sys_trace_sys_init_enter(entry, level);
-
-		if (is_entry_about_service(entry->_init_object)) {
-			const struct service *srv = entry->srv;
-
-			result = srv->init();
-		} else {
-			const struct device *dev = entry->dev;
-
+		if (dev != NULL) {
 			if ((dev->flags & DEVICE_FLAG_INIT_DEFERRED) == 0U) {
 				result = do_device_init(dev);
 			}
+		} else {
+			result = entry->init_fn();
 		}
-
 		sys_trace_sys_init_exit(entry, level, result);
 	}
 }
@@ -674,6 +656,10 @@ void z_init_cpu(int id)
 				  _kernel.cpus[id].usage,
 				  sizeof(struct k_cycle_stats));
 #endif
+#endif
+
+#ifdef CONFIG_SCHED_IPI_SUPPORTED
+	sys_dlist_init(&_kernel.cpus[id].ipi_workq);
 #endif
 }
 

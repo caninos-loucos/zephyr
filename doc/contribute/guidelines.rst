@@ -132,7 +132,7 @@ statement and thereby agrees to the DCO.
 
 When a developer submits a patch, it is a commitment that the contributor has
 the right to submit the patch per the license.  The DCO agreement is shown
-below and at http://developercertificate.org/.
+below and at https://developercertificate.org/.
 
 .. code-block:: none
 
@@ -357,6 +357,19 @@ compliance with Zephyr standards and facilitate the review process.
 If in doubt, it's advisable to explore existing Pull Requests within the Zephyr
 repository. Use the search filters and labels to locate PRs related to changes
 similar to the ones you are proposing.
+
+.. note::
+   GitHub's default code UI uses 4-character tabs. However, Zephyr follows the
+   `Linux kernel coding style`_, which uses 8-character tabs.
+
+   To ensure your view of the code is consistent with other developers, please
+   go to your `user preferences on GitHub`_ and change the tab width to 8 spaces.
+
+.. _Linux kernel coding style:
+   https://kernel.org/doc/html/latest/process/coding-style.html#indentation
+
+.. _user preferences on GitHub:
+   https://github.com/settings/appearance
 
 .. _commit-guidelines:
 
@@ -874,7 +887,7 @@ For example, a copy of a locally maintained import::
 
       Origin: Contiki OS
       License: BSD 3-Clause
-      URL: http://www.contiki-os.org/
+      URL: https://www.contiki-os.org/
       commit: 853207acfdc6549b10eb3e44504b1a75ae1ad63a
       Purpose: Introduction of networking stack.
 

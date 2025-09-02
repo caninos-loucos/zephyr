@@ -48,8 +48,18 @@ https://docs.zephyrproject.org/latest/security/vulnerabilities.html
 API Changes
 ***********
 
+* RTIO
+
+  * :c:func:`rtio_is_spi`
+  * :c:func:`rtio_is_cspi`
+  * :c:func:`rtio_is_i3c`
+  * :c:func:`rtio_read_regs_async`
+
 Removed APIs and options
 ========================
+
+* The TinyCrypt library was removed as the upstream version is no longer maintained.
+  PSA Crypto API is now the recommended cryptographic library for Zephyr.
 
 Deprecated APIs and options
 ===========================
@@ -62,6 +72,97 @@ New APIs and options
   fancy just list the link, that should contain the documentation. If you feel
   like you need to add more details, add them in the API documentation code
   instead.
+
+.. zephyr-keep-sorted-start re(^\* \w)
+
+* Architectures
+
+  * :kconfig:option:`CONFIG_ARCH_HAS_HW_SHADOW_STACK`
+  * :kconfig:option:`CONFIG_SRAM_SW_ISR_TABLE`
+
+  * x86 Intel CET support
+
+    * :kconfig:option:`CONFIG_X86_CET`
+    * :kconfig:option:`CONFIG_X86_CET_IBT`
+    * :kconfig:option:`CONFIG_X86_CET_SHADOW_STACK_ALIGNMENT`
+    * :kconfig:option:`CONFIG_X86_CET_SOC_PREPARE_SHADOW_STACK_SWITCH`
+    * :kconfig:option:`CONFIG_X86_CET_VERIFY_KERNEL_SHADOW_STACK`
+
+  * ARM (Cortex-M) system state save/restore primitives
+
+    * :c:func:`z_arm_save_scb_context` / :c:func:`z_arm_restore_scb_context`
+    * :c:func:`z_arm_save_mpu_context` / :c:func:`z_arm_restore_mpu_context`
+    * Existing :c:func:`z_arm_save_fp_context` and :c:func:`z_arm_save_fp_context` have also been updated
+
+* Bluetooth
+
+  * Audio
+
+    * :c:struct:`bt_audio_codec_cfg` now contains a target_latency and a target_phy option
+    * :c:func:`bt_bap_broadcast_source_foreach_stream`
+    * :c:func:`bt_cap_initiator_broadcast_foreach_stream`
+    * :c:struct:`bt_bap_stream` now contains an ``iso`` field as a reference to the ISO channel
+
+  * Host
+
+    * :c:struct:`bt_iso_unicast_info` now contains a ``cig_id`` and a ``cis_id`` field
+    * :c:struct:`bt_iso_broadcaster_info` now contains a ``big_handle`` and a ``bis_number`` field
+    * :c:struct:`bt_iso_sync_receiver_info` now contains a ``big_handle`` and a ``bis_number`` field
+    * :c:struct:`bt_le_ext_adv_info` now contains an ``sid`` field with the Advertising Set ID.
+
+* Display
+
+  * :c:enumerator:`PIXEL_FORMAT_AL_88`
+
+  * SDL
+
+    * :kconfig:option:`CONFIG_SDL_DISPLAY_DEFAULT_PIXEL_FORMAT_AL_88`
+    * :kconfig:option:`CONFIG_SDL_DISPLAY_COLOR_TINT`
+
+* Kernel
+
+  * :kconfig:option:`CONFIG_HW_SHADOW_STACK`
+  * :kconfig:option:`CONFIG_HW_SHADOW_STACK_ALLOW_REUSE`
+  * :kconfig:option:`CONFIG_HW_SHADOW_STACK_MIN_SIZE`
+  * :kconfig:option:`CONFIG_HW_SHADOW_STACK_PERCENTAGE_SIZE`
+  * :c:macro:`K_THREAD_HW_SHADOW_STACK_SIZE`
+  * :c:macro:`K_KERNEL_HW_SHADOW_STACK_DECLARE`
+  * :c:macro:`K_KERNEL_HW_SHADOW_STACK_ARRAY_DECLARE`
+  * :c:macro:`K_THREAD_HW_SHADOW_STACK_DEFINE`
+  * :c:macro:`K_THREAD_HW_SHADOW_STACK_ARRAY_DEFINE`
+  * :c:macro:`K_THREAD_HW_SHADOW_STACK_ATTACH`
+  * :c:macro:`k_thread_hw_shadow_stack_attach`
+
+* Logging:
+
+  * Added rate-limited logging macros to prevent log flooding when messages are generated frequently.
+
+    * :c:macro:`LOG_ERR_RATELIMIT` - Rate-limited error logging macro (convenience)
+    * :c:macro:`LOG_WRN_RATELIMIT` - Rate-limited warning logging macro (convenience)
+    * :c:macro:`LOG_INF_RATELIMIT` - Rate-limited info logging macro (convenience)
+    * :c:macro:`LOG_DBG_RATELIMIT` - Rate-limited debug logging macro (convenience)
+    * :c:macro:`LOG_HEXDUMP_ERR_RATELIMIT` - Rate-limited error hexdump macro (convenience)
+    * :c:macro:`LOG_HEXDUMP_WRN_RATELIMIT` - Rate-limited warning hexdump macro (convenience)
+    * :c:macro:`LOG_HEXDUMP_INF_RATELIMIT` - Rate-limited info hexdump macro (convenience)
+    * :c:macro:`LOG_HEXDUMP_DBG_RATELIMIT` - Rate-limited debug hexdump macro (convenience)
+    * :c:macro:`LOG_ERR_RATELIMIT_RATE` - Rate-limited error logging macro (explicit rate)
+    * :c:macro:`LOG_WRN_RATELIMIT_RATE` - Rate-limited warning logging macro (explicit rate)
+    * :c:macro:`LOG_INF_RATELIMIT_RATE` - Rate-limited info logging macro (explicit rate)
+    * :c:macro:`LOG_DBG_RATELIMIT_RATE` - Rate-limited debug logging macro (explicit rate)
+    * :c:macro:`LOG_HEXDUMP_ERR_RATELIMIT_RATE` - Rate-limited error hexdump macro (explicit rate)
+    * :c:macro:`LOG_HEXDUMP_WRN_RATELIMIT_RATE` - Rate-limited warning hexdump macro (explicit rate)
+    * :c:macro:`LOG_HEXDUMP_INF_RATELIMIT_RATE` - Rate-limited info hexdump macro (explicit rate)
+    * :c:macro:`LOG_HEXDUMP_DBG_RATELIMIT_RATE` - Rate-limited debug hexdump macro (explicit rate)
+
+* Power management
+
+   * :c:func:`pm_device_driver_deinit`
+
+* Settings
+
+   * :kconfig:option:`CONFIG_SETTINGS_TFM_ITS`
+
+.. zephyr-keep-sorted-stop
 
 New Boards
 **********
@@ -79,6 +180,19 @@ New Drivers
   Same as above for boards, this will also be recomputed at the time of the release.
   Just link the driver, further details go in the binding description
 
+* Input
+
+   * :dtcompatible:`chipsemi,chsc5x`
+
+* Interrupt controller
+
+   * STM32 EXTI interrupt/event controller (:dtcompatible:`st,stm32-exti`) has a dedicated driver and API now, separate from STM32 GPIO Interrupt Control driver.
+
+* RTC
+
+   * STM32 RTC driver has been updated to use the new STM32 EXTI interrupt controller API
+
+
 New Samples
 ***********
 
@@ -86,9 +200,29 @@ New Samples
   Same as above for boards and drivers, this will also be recomputed at the time of the release.
  Just link the sample, further details go in the sample documentation itself.
 
+Libraries / Subsystems
+**********************
+
+* Logging:
+
+  * Added hybrid rate-limited logging macros to prevent log flooding when messages are generated frequently.
+    The system provides both convenience macros (using default rate from :kconfig:option:`CONFIG_LOG_RATELIMIT_INTERVAL_MS`)
+    and explicit rate macros (with custom rate parameter). This follows Linux's ``printk_ratelimited`` pattern
+    while providing more flexibility. The rate limiting is per-macro-call-site, meaning that each unique call
+    to a rate-limited macro has its own independent rate limit. Rate-limited logging can be globally enabled/disabled
+    via :kconfig:option:`CONFIG_LOG_RATELIMIT`. When rate limiting is disabled, the behavior can be controlled
+    via :kconfig:option:`CONFIG_LOG_RATELIMIT_FALLBACK` to either log all messages or drop them completely.
+    For more details, see :ref:`logging_ratelimited`.
+
 Other notable changes
 *********************
 
 ..
   Any more descriptive subsystem or driver changes. Do you really want to write
   a paragraph or is it enough to link to the api/driver/Kconfig/board page above?
+
+* Nordic Semiconductor nRF54L09 PDK (``nrf54l09pdk``), which only targeted an emulator, has been removed
+  from the tree. It will be replaced with a proper board definition as soon as it's available.
+
+* Removed support for Nordic Semiconductor nRF54L20 PDK (``nrf54l20pdk``) since it is
+  replaced with :zephyr:board:`nrf54lm20dk` (``nrf54lm20dk``).
