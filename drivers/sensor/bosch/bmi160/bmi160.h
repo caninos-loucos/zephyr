@@ -268,6 +268,7 @@ extern "C" {
 
 /* other */
 #define BMI160_CHIP_ID			0xD1
+#define BMX160_CHIP_ID			0xD8
 #define BMI160_TEMP_OFFSET		23
 
 /* allowed ODR values */

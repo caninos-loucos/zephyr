@@ -1079,7 +1079,7 @@ int bmi160_init(const struct device *dev)
 		return -EIO;
 	}
 
-	if (val != BMI160_CHIP_ID) {
+	if (val != BMI160_CHIP_ID && val != BMX160_CHIP_ID) {
 		LOG_DBG("Unsupported chip detected (0x%x)!", val);
 		return -ENODEV;
 	}
