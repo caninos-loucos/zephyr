@@ -6,6 +6,7 @@
 
 #include "bmi323.h"
 #include "bmi323_spi.h"
+#include "bmi323_i2c.h"
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
@@ -1315,13 +1316,10 @@ static int bosch_bmi323_init(const struct device *dev)
 	return ret;
 }
 
-/*
- * Currently only support for the SPI bus is implemented. This shall be updated to
- * select the appropriate bus once I2C is implemented.
- */
-#define BMI323_DEVICE_BUS(inst)                                                                    \
-	BUILD_ASSERT(DT_INST_ON_BUS(inst, spi), "Unimplemented bus");                              \
-	BMI323_DEVICE_SPI_BUS(inst)
+#define BMI323_DEVICE_BUS(inst)  				                                   \
+    BUILD_ASSERT(DT_INST_ON_BUS(inst, spi) || DT_INST_ON_BUS(inst, i2c), "Unimplemented bus");     \
+      COND_CODE_1(DT_INST_ON_BUS(inst, i2c),(BMI323_DEVICE_I2C_BUS(inst)),(BMI323_DEVICE_SPI_BUS(inst)))
+
 
 #define BMI323_DEVICE(inst)                                                                        \
 	static struct bosch_bmi323_data bosch_bmi323_data_##inst;                                  \
