@@ -86,6 +86,161 @@ static int bosch_bmi323_bus_write_words(const struct device *dev, uint8_t offset
 	return bus->api->write_words(bus->context, offset, words, words_count);
 }
 
+// FIFO usage
+
+int bosch_bmi323_fifo_flush(const struct device *dev)
+{
+	uint16_t ctrl = 0;
+
+	ctrl = FIELD_PREP(GENMASK(IMU_BOSCH_BMI323_REG_FIFO_CTRL_FLUSH_OFFSET +
+				  IMU_BOSCH_BMI323_REG_FIFO_CTRL_FLUSH_SIZE - 1,
+				  IMU_BOSCH_BMI323_REG_FIFO_CTRL_FLUSH_OFFSET),
+			  1u);
+
+	return bosch_bmi323_bus_write_words(dev, IMU_BOSCH_BMI323_REG_FIFO_CTRL, &ctrl, 1);
+}
+
+int bmi323_read_reg(const struct device *dev,
+                    uint8_t reg,
+                    uint16_t *val)
+{
+    return bosch_bmi323_bus_read_words(dev, reg, val, 1);
+}
+
+int bmi323_fifo_enable_acc(const struct device *dev)
+{
+    uint16_t fifo_conf;
+    int ret;
+
+    ret = bosch_bmi323_bus_read_words(dev,
+                          			  IMU_BOSCH_BMI323_REG_FIFO_CONF,
+                          			  &fifo_conf,
+						  			  1);
+    if (ret) {
+        return ret;
+    }
+
+    fifo_conf |= (1 << 9);
+
+    ret = bosch_bmi323_bus_write_words(dev,
+                           			   IMU_BOSCH_BMI323_REG_FIFO_CONF,
+                           			   &fifo_conf,
+						   			   1);
+    if (ret) {
+        return ret;
+    }
+
+    return 0;
+}
+
+int bmi323_fifo_get_length(const struct device *dev, uint16_t *length)
+{
+    int ret = bosch_bmi323_bus_read_words(dev,
+                                      IMU_BOSCH_BMI323_REG_FIFO_FILL_LEVEL,
+                                      length,
+                                      1);
+	
+    if (ret < 0) {
+        LOG_WRN("FIFO length read error: %d\n", ret);
+        return ret;
+    }
+
+    return 0;
+}
+
+int bosch_bmi323_set_fifo_acc(const struct device *dev, uint16_t watermark_frames)
+{
+	uint16_t fifo_conf;
+	uint16_t fifo_ctrl;
+	uint16_t fifo_wm;
+	int ret;
+
+	/* ACC only = 3 words per frame */
+	fifo_wm = watermark_frames * 3U;
+
+	/* FIFO_WATERMARK 10 bits */
+	if (fifo_wm > 0x03FF) {
+		LOG_WRN("watermark config overflow\n");
+		return -EINVAL;
+	}
+
+	/* 1) Flush FIFO */
+	fifo_ctrl = BIT(IMU_BOSCH_BMI323_REG_FIFO_CTRL_FLUSH_OFFSET);
+
+	ret = bosch_bmi323_bus_write_words(dev,
+					   IMU_BOSCH_BMI323_REG_FIFO_CTRL,
+					   &fifo_ctrl,
+					   1);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* 2) FIFO_CONF = ACC_EN */
+	fifo_conf = BIT(IMU_BOSCH_BMI323_REG_FIFO_CONF_ACC_EN_OFFSET);
+
+	ret = bosch_bmi323_bus_write_words(dev,
+					   IMU_BOSCH_BMI323_REG_FIFO_CONF,
+					   &fifo_conf,
+					   1);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = bosch_bmi323_bus_write_words(dev,
+					   IMU_BOSCH_BMI323_REG_FIFO_WATERMARK,
+					   &fifo_wm,
+					   1);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	return 0;
+}
+
+int bosch_bmi323_fifo_read_acc(const struct device *dev,
+                               uint8_t *buffer,
+                               uint16_t buffer_size, // in (2 bytes) words
+                               uint16_t *words_read)
+{
+    uint16_t fifo_len = 0;
+
+    int ret = bmi323_fifo_get_length(dev, &fifo_len);
+    if (ret < 0) {
+		return ret;
+    }
+
+    /* limit to buffer size*/
+    if (fifo_len > buffer_size) {
+        fifo_len = buffer_size;
+        fifo_len -= (fifo_len % 3);
+    }
+
+	/* ensure ACC frame multiple (3 words) */ 
+    fifo_len -= (fifo_len % 3);
+
+    if (fifo_len == 0) {
+        *words_read = 0;
+        return 0;
+    }
+
+	ret = bosch_bmi323_bus_read_words(
+			dev,
+			IMU_BOSCH_BMI323_REG_FIFO_DATA,
+			(uint16_t *)buffer,
+			fifo_len);
+
+        if (ret < 0) {
+            return ret;
+        }
+
+    *words_read = fifo_len;
+
+    return 0;
+}
+
 static int32_t bosch_bmi323_lsb_from_fullscale(int64_t fullscale)
 {
 	return (fullscale * 1000) / INT16_MAX;

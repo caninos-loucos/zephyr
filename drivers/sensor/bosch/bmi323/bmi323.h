@@ -9,6 +9,7 @@
 
 #include <zephyr/sys/util.h>
 #include <zephyr/types.h>
+#include <zephyr/device.h>
 
 #define IMU_BOSCH_BMI323_REG_ACC_DATA_X (0x03)
 #define IMU_BOSCH_BMI323_REG_ACC_DATA_Y (0x04)
@@ -47,6 +48,41 @@
 
 #define IMU_BOSCH_BMI323_REG_INT_STATUS_INT1 (0x0D)
 #define IMU_BOSCH_BMI323_REG_INT_STATUS_INT2 (0x0E)
+
+/* FIFO */
+#define IMU_BOSCH_BMI323_REG_FIFO_FILL_LEVEL  (0x15) 
+#define IMU_BOSCH_BMI323_REG_FIFO_DATA        (0x16) 
+#define IMU_BOSCH_BMI323_REG_FIFO_WATERMARK   (0x35) 
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF        (0x36)
+#define IMU_BOSCH_BMI323_REG_FIFO_CTRL        (0x37)
+
+/* FIFO_WATERMARK (0x35) */
+#define IMU_BOSCH_BMI323_REG_FIFO_WATERMARK_WM_OFFSET (0x00)
+#define IMU_BOSCH_BMI323_REG_FIFO_WATERMARK_WM_SIZE   (0x0A) /* 10 bits */
+
+/* FIFO_CONF (0x36) */
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_STOP_ON_FULL_OFFSET (0x00)
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_STOP_ON_FULL_SIZE   (0x01)
+
+#define BMI323_FIFO_CONFIG_MASK                        UINT16_C(0x0F01)
+
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_ACC_EN_OFFSET       (0x01)
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_ACC_EN_SIZE         (0x01)
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_ACC_EN_VAL_0 	   (0x00)
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_ACC_EN_VAL_1        (0x01)
+
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_GYR_EN_OFFSET       (0x02)
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_GYR_EN_SIZE         (0x01)
+
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_TEMP_EN_OFFSET      (0x03)
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_TEMP_EN_SIZE        (0x01)
+
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_TIME_EN_OFFSET      (0x04)
+#define IMU_BOSCH_BMI323_REG_FIFO_CONF_TIME_EN_SIZE        (0x01)
+
+/* FIFO_CTRL (0x37) */
+#define IMU_BOSCH_BMI323_REG_FIFO_CTRL_FLUSH_OFFSET        (0x00)
+#define IMU_BOSCH_BMI323_REG_FIFO_CTRL_FLUSH_SIZE          (0x01)
 
 #define IMU_BOSCH_BMI323_REG_ACC_CONF (0x20)
 
@@ -192,5 +228,23 @@ struct bosch_bmi323_bus {
 	const void *context;
 	const struct bosch_bmi323_bus_api *api;
 };
+
+int bmi323_fifo_enable_acc(const struct device *dev);
+
+int bosch_bmi323_set_fifo_acc(const struct device *dev,
+						  uint16_t watermark_frames);
+
+
+int bmi323_read_reg(const struct device *dev,
+                    uint8_t reg,
+                    uint16_t *val);
+                    
+int bosch_bmi323_fifo_flush(const struct device *dev);
+
+					
+int bosch_bmi323_fifo_read_acc(const struct device *dev,
+                               uint8_t *buffer,
+                               uint16_t buffer_size,
+                               uint16_t *bytes_lidos);
 
 #endif /* ZEPHYR_DRIVERS_SENSOR_BMI323_BMI323_H_ */
